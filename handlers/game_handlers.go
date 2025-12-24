@@ -53,7 +53,7 @@ func HandleGenerateAIDescription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	description := services.GenerateDescription(body.SecretWord)
+	description := services.GenerateDescriptionGroq(body.SecretWord)
 
 	if description == "" {
 		fmt.Println("⚠️ AI ส่งค่าว่างกลับมา กรุณาตรวจสอบ API Key หรือ Quota")
@@ -80,30 +80,23 @@ func HandleStartHeartGame(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ✅ HandleAskQuestion: แก้ไขจุด mismatch และเพิ่ม Log ตรวจสอบ
 func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
 	}
 	var msg struct {
-		GameID   string `json:"game_id"` // นี่คือ Session ID จากหน้าแชท
+		GameID   string `json:"game_id"`
 		SenderID string `json:"sender_id"`
 		Message  string `json:"message"`
 	}
 	json.NewDecoder(r.Body).Decode(&msg)
 
-	fmt.Printf("📥 รับคำถามจาก SessionID: %s, ข้อความ: %s\n", msg.GameID, msg.Message)
-
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-
-	// ✅ 1. หาว่า Session นี้ผูกกับ Heart Game อันไหน เพื่อเอา ID ที่แท้จริงไปใช้
 	var sessionData []map[string]interface{}
 	client.From("game_sessions").Select("game_id", "", false).Eq("id", msg.GameID).ExecuteTo(&sessionData)
 
 	if len(sessionData) > 0 {
 		heartGameID := sessionData[0]["game_id"].(string)
-
-		// ✅ 2. ดึงคำลับและคำอธิบายมาให้ AI ใช้ตัดสินใจ
 		var gameData []map[string]interface{}
 		client.From("heart_games").Select("*", "", false).Eq("id", heartGameID).ExecuteTo(&gameData)
 
@@ -114,33 +107,27 @@ func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
 				description = gameData[0]["description"].(string)
 			}
 
-			// เรียกใช้ AI (ระบบจะสลับคีย์ 1-3 ให้อัตโนมัติใน services)
-			botAnswer := services.AskGemini(secretWord, description, msg.Message)
+			cleanInput := strings.TrimSpace(msg.Message)
+			botAnswer := ""
 
-			// ✅ 3. ตรวจสอบการชนะเกม (ถ้ามีคำว่าถูกต้อง ให้จบเกมทันที)
-			if strings.Contains(botAnswer, "ถูกต้อง") {
-				client.From("heart_games").Update(map[string]interface{}{
-					"status": "finished",
-				}, "", "").Eq("id", heartGameID).Execute()
+			// ✅ 1. SYSTEM CHECK: ต้องพิมพ์คำลับมาตรงเป๊ะเท่านั้นถึงจะ "ถูกต้อง"
+			// ลบ strings.Contains ออก เพื่อป้องกันการทายกว้างๆ แล้วถูก (เช่น ทาย 'ของกิน' แล้วถูก 'ขนม')
+			if cleanInput == secretWord {
 				botAnswer = "ถูกต้อง"
-			}
-
-			// ✅ 4. บันทึกข้อความลง Database (ใช้ 3 ตัวแปรเพื่อไม่ให้ mismatch)
-			_, _, err := client.From("game_messages").Insert(map[string]interface{}{
-				"game_id":   heartGameID, // บันทึกด้วย Heart Game ID เพื่อให้ความสัมพันธ์ข้อมูลถูกต้อง
-				"sender_id": msg.SenderID,
-				"message":   msg.Message,
-				"answer":    botAnswer,
-			}, false, "", "", "").Execute()
-
-			if err != nil {
-				fmt.Printf("❌ บันทึกไม่สำเร็จ: %v\n", err)
+				client.From("heart_games").Update(map[string]interface{}{"status": "finished"}, "", "").Eq("id", heartGameID).Execute()
+			} else if strings.Contains(cleanInput, "ขอคำใบ้") || strings.Contains(cleanInput, "ใบ้หน่อย") {
+				botAnswer = services.AskGroqHint(secretWord, description)
 			} else {
-				fmt.Printf("✅ AI ตอบและบันทึกสำเร็จ: %s\n", botAnswer)
+				// ✅ 2. ให้ AI วิเคราะห์และตอบ (ห้ามหลุดคำลับ)
+				botAnswer = services.AskGroq(secretWord, description, msg.Message)
 			}
+
+			client.From("game_messages").Insert(map[string]interface{}{
+				"game_id": heartGameID, "sender_id": msg.SenderID, "message": msg.Message, "answer": botAnswer,
+			}, false, "", "", "").Execute()
+			w.WriteHeader(http.StatusCreated)
+			return
 		}
-	} else {
-		fmt.Printf("❌ ไม่พบข้อมูล Session สำหรับ ID: %s\n", msg.GameID)
 	}
 	w.WriteHeader(http.StatusCreated)
 }

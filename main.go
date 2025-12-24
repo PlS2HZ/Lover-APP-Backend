@@ -69,6 +69,8 @@ func main() {
 	http.HandleFunc("/api/game/create", handlers.HandleCreateGame)
 	http.HandleFunc("/api/game/generate-description", handlers.HandleGenerateAIDescription)
 
+	http.HandleFunc("/api/game/bot-auto-create", handlers.HandleBotAutoCreateGame)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
