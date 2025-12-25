@@ -14,6 +14,8 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
+var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
+
 // --- Event & Calendar ---
 // handlers/event_handlers.go
 
@@ -36,7 +38,7 @@ func HandleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		// ✅ แปลงวันที่ให้อ่านง่ายและเพิ่มรายละเอียด + ลิงก์
 		t, _ := time.Parse(time.RFC3339, ev.EventDate)
-		dateStr := t.Local().Format("02/01/2006 15:04")
+		dateStr := t.In(loc).Format("02/01/2006 15:04")
 
 		msg := fmt.Sprintf("📅 **หัวข้อ:** %s\n🗓️ **วันที่/เวลา:** %s\n📝 **รายละเอียด:** %s\n🔁 **การวนซ้ำ:** %s\n\n🔗 ดูปฏิทิน: %s",
 			ev.Title, dateStr, ev.Description, ev.RepeatType, APP_URL)
@@ -132,9 +134,11 @@ func HandleCheckSubscription(w http.ResponseWriter, r *http.Request) {
 // ✅ ก๊อปปี้มาจากเดิม เพื่อให้ main.go เรียกใช้งานได้
 func CheckAndNotify() {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	now := time.Now().Format("2006-01-02T15:04:00.000Z")
+	// ✅ ดึงเวลาปัจจุบันเป็นโซนไทย และตัดวินาทีออก
+	nowTime := time.Now().In(loc)
+	nowStr := nowTime.Format("2006-01-02T15:04") // ใช้แค่ถึงนาที
 	var results []map[string]interface{}
-	client.From("events").Select("*", "exact", false).Eq("event_date", now).ExecuteTo(&results)
+	client.From("events").Select("*", "exact", false).Like("event_date", nowStr+"%").ExecuteTo(&results)
 
 	if len(results) > 0 {
 		for _, ev := range results {

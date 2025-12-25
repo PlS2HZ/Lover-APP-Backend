@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
+	_ "strings"
 	"time"
 
 	"github.com/supabase-community/postgrest-go"
@@ -83,9 +83,14 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 
 	// 4. แจ้งเตือน Discord & Push
 	go func() {
+		// ✅ ปรับรูปแบบการแสดงผลเวลาใน Discord ให้สวยงาม
+		parseTime := func(iso string) string {
+			t, _ := time.Parse(time.RFC3339, iso)
+			return t.In(loc).Format("02/01/2006 เวลา 15:04")
+		}
 		// ✅ เปลี่ยน T เป็นคำว่า " เวลา " เพื่อให้อ่านง่ายขึ้น
-		formattedStart := strings.Replace(req.StartTime, "T", " เวลา ", 1)
-		formattedEnd := strings.Replace(req.EndTime, "T", " เวลา ", 1)
+		formattedStart := parseTime(req.StartTime)
+		formattedEnd := parseTime(req.EndTime)
 
 		msg := fmt.Sprintf("👤 **จาก:** %s\n🏷️ **ประเภท:** %s\n📖 **รายละเอียดคำขอ:** %s\n⏰ **เริ่ม:** %s\n🏁 **สิ้นสุด:** %s\n⏳ **ระยะเวลารวม:** %s\n\n🔗 เข้าแอปที่นี่: %s",
 			sName, req.Header, req.Title, formattedStart, formattedEnd, req.Duration, APP_URL)
