@@ -12,6 +12,7 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
+// BOT_ID ของระบบ
 const BOT_ID = "00000000-0000-0000-0000-000000000000"
 
 func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
@@ -37,16 +38,28 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	avoidList := strings.Join(usedWords, ", ")
 
-	// ✅ 2. สั่ง AI สุ่มคำใหม่โดยห้ามซ้ำกับคำในลิสต์
-	prompt := fmt.Sprintf("สุ่มคำนามไทย 1 คำ (สัตว์/สิ่งของ/ตัวละคร/สถานที่) ตอบแค่คำนั้นคำเดียว ห้ามซ้ำกับคำพวกนี้: %s", avoidList)
+	// ✅ 2. สั่ง AI สุ่มคำใหม่ (เน้นย้ำให้ตอบแค่คำเดียว ห้ามมีอย่างอื่นเจือปน)
+	prompt := fmt.Sprintf(`จงสุ่มคำนามไทย 1 คำ ห้ามซ้ำกับ: %s. ตอบแค่คำนั้นคำเดียว!`, avoidList)
 	secretWord := services.AskGroqRaw(prompt)
 	secretWord = strings.TrimSpace(strings.ReplaceAll(secretWord, ".", ""))
+
+	descPrompt := fmt.Sprintf(`
+    อธิบายลักษณะของ "%s" เป็นภาษาไทย 5 หัวข้อ:
+    1.ประเภท... 2.ลักษณะ... 3.การใช้... 4.สถานที่... 5.จุดเด่น...
+    [กฎ] ตอบสั้นๆ หัวข้อละ 1 ประโยค ห้ามยาว ห้ามเฉลยชื่อคำนี้เด็ดขาด`, secretWord)
+
+	// ทำความสะอาดคำเผื่อ AI ดื้อใส่เครื่องหมายมา
+	secretWord = strings.TrimSpace(secretWord)
+	secretWord = strings.ReplaceAll(secretWord, ".", "")
+	secretWord = strings.ReplaceAll(secretWord, "\"", "")
+	secretWord = strings.ReplaceAll(secretWord, "'", "")
+
 	if secretWord == "" {
 		secretWord = "เครื่องบิน" // Fallback word
 	}
 
-	// ✅ 3. สั่งให้ AI สร้างฐานความรู้
-	description := services.GenerateDescriptionGroq(secretWord)
+	// ✅ 3. สั่งให้ AI สร้างฐานความรู้ (ใช้คำสั่ง GenerateDescription ที่นายพอใจ)
+	description := services.AskGroqCustom(descPrompt, 800)
 
 	// 4. บันทึกลงตาราง heart_games
 	newGame := map[string]interface{}{

@@ -15,7 +15,13 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
-// HandleCreateHeartGame สร้างโจทย์ใหม่
+// ✅ ฟังก์ชันช่วยเช็คคำผิด (ห้ามลบ!)
+func isCloseEnough(s1, s2 string) bool {
+	// ถ้าทายผิดไม่เกิน 2 ตัวอักษร และไม่ใช่การพิมพ์ถูกเป๊ะ ให้ถือว่าสะกดผิด
+	dist := utils.LevenshteinDistance(s1, s2)
+	return dist <= 2 && dist > 0
+}
+
 func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
@@ -52,13 +58,7 @@ func HandleGenerateAIDescription(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		return
 	}
-
 	description := services.GenerateDescriptionGroq(body.SecretWord)
-
-	if description == "" {
-		fmt.Println("⚠️ AI ส่งค่าว่างกลับมา กรุณาตรวจสอบ API Key หรือ Quota")
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"description": description})
 }
@@ -68,15 +68,11 @@ func HandleStartHeartGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gameID := r.URL.Query().Get("id")
-
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	now := time.Now()
-
 	client.From("heart_games").Update(map[string]interface{}{
 		"status":     "playing",
-		"start_time": now,
+		"start_time": time.Now(),
 	}, "", "").Eq("id", gameID).Execute()
-
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -110,15 +106,16 @@ func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
 			cleanInput := strings.TrimSpace(msg.Message)
 			botAnswer := ""
 
-			// ✅ 1. SYSTEM CHECK: ต้องพิมพ์คำลับมาตรงเป๊ะเท่านั้นถึงจะ "ถูกต้อง"
-			// ลบ strings.Contains ออก เพื่อป้องกันการทายกว้างๆ แล้วถูก (เช่น ทาย 'ของกิน' แล้วถูก 'ขนม')
 			if cleanInput == secretWord {
 				botAnswer = "ถูกต้อง"
 				client.From("heart_games").Update(map[string]interface{}{"status": "finished"}, "", "").Eq("id", heartGameID).Execute()
+			} else if isCloseEnough(cleanInput, secretWord) {
+				// ✅ ระบบดักคำสะกดผิด (Typo)
+				botAnswer = fmt.Sprintf("นายหมายถึง '%s' หรือเปล่า? เกือบถูกแล้วสะกดอีกนิด!", secretWord)
 			} else if strings.Contains(cleanInput, "ขอคำใบ้") || strings.Contains(cleanInput, "ใบ้หน่อย") {
-				botAnswer = services.AskGroqHint(secretWord, description)
+				// ✅ ส่งเฉพาะ description ไปให้บอทวิเคราะห์คำใบ้ใหม่
+				botAnswer = services.AskGroqHint(description)
 			} else {
-				// ✅ 2. ให้ AI วิเคราะห์และตอบ (ห้ามหลุดคำลับ)
 				botAnswer = services.AskGroq(secretWord, description, msg.Message)
 			}
 
@@ -157,6 +154,5 @@ func HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	client.From("game_sessions").Insert(map[string]interface{}{
 		"game_id": body.GameID, "guesser_id": body.GuesserID, "mode": "bot", "status": "playing",
 	}, false, "", "", "").ExecuteTo(&session)
-	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(session[0])
 }
