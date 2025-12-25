@@ -25,17 +25,30 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 
-	// ✅ 1. สุ่มคำลับผ่าน Groq (ไวและฉลาด)
-	secretWord := services.AskGroqRaw("สุ่มคำนามไทย 1 คำ (สัตว์/สิ่งของ/ตัวละคร/สถานที่) ตอบแค่คำนั้นคำเดียว")
+	// ✅ 1. ดึงคำลับที่มีอยู่แล้วทั้งหมดมาป้องกันการซ้ำ
+	var existingGames []map[string]interface{}
+	client.From("heart_games").Select("secret_word", "", false).ExecuteTo(&existingGames)
+
+	var usedWords []string
+	for _, g := range existingGames {
+		if word, ok := g["secret_word"].(string); ok {
+			usedWords = append(usedWords, word)
+		}
+	}
+	avoidList := strings.Join(usedWords, ", ")
+
+	// ✅ 2. สั่ง AI สุ่มคำใหม่โดยห้ามซ้ำกับคำในลิสต์
+	prompt := fmt.Sprintf("สุ่มคำนามไทย 1 คำ (สัตว์/สิ่งของ/ตัวละคร/สถานที่) ตอบแค่คำนั้นคำเดียว ห้ามซ้ำกับคำพวกนี้: %s", avoidList)
+	secretWord := services.AskGroqRaw(prompt)
 	secretWord = strings.TrimSpace(strings.ReplaceAll(secretWord, ".", ""))
 	if secretWord == "" {
-		secretWord = "กาแฟ"
+		secretWord = "เครื่องบิน" // Fallback word
 	}
 
-	// ✅ 2. สั่งให้ AI สร้างฐานความรู้ (ลบ descPrompt ที่ไม่ได้ใช้ออกเพื่อแก้ Error)
+	// ✅ 3. สั่งให้ AI สร้างฐานความรู้
 	description := services.GenerateDescriptionGroq(secretWord)
 
-	// 3. บันทึกลงตาราง heart_games
+	// 4. บันทึกลงตาราง heart_games
 	newGame := map[string]interface{}{
 		"host_id":     BOT_ID,
 		"secret_word": secretWord,
@@ -60,7 +73,7 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	gameID := gameResult[0]["id"].(string)
 
-	// 4. สร้าง Session
+	// 5. สร้าง Session
 	newSession := map[string]interface{}{
 		"game_id": gameID, "guesser_id": body.GuesserID, "mode": "bot", "status": "playing",
 	}
