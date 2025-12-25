@@ -13,26 +13,20 @@ import (
 
 // AskGroqRaw: ฟังก์ชันพื้นฐานสำหรับยิง API หา Groq (ใช้ Token มาตรฐาน 100)
 func AskGroqRaw(prompt string) string {
-	return AskGroqCustom(prompt, 100)
+	// ปรับตรงนี้: ถ้าเป็นการสุ่มคำ ให้ใช้ Temperature สูง (1.2) เพื่อความไม่ซ้ำซาก
+	return AskGroqCustomWithTemp(prompt, 100, 1.2)
 }
 
-// AskGroqCustom: ฟังก์ชันหลักที่ยอมให้กำหนดความยาวการตอบได้
-func AskGroqCustom(prompt string, maxTokens int) string {
-	startTime := time.Now()
+// เพิ่มฟังก์ชันช่วยภายใน (Internal) เพื่อรับค่า Temp
+func AskGroqCustomWithTemp(prompt string, maxTokens int, temp float64) string {
 	apiKey := os.Getenv("GROQ_API_KEY")
-	if apiKey == "" {
-		return "เออ... ลืมตั้ง GROQ_API_KEY ใน .env นะนาย"
-	}
-
 	url := "https://api.groq.com/openai/v1/chat/completions"
 	payload := map[string]interface{}{
-		"model":             "llama-3.3-70b-versatile",
-		"messages":          []map[string]interface{}{{"role": "user", "content": prompt}},
-		"temperature":       0.5,       // ✅ ลดลงนิดหน่อยเพื่อให้ตอบนิ่งขึ้น
-		"max_tokens":        maxTokens, // ✅ ปรับเปลี่ยนตามความเหมาะสมของงาน
-		"top_p":             0.8,
-		"frequency_penalty": 0.6,
-		"presence_penalty":  0.3,
+		"model":       "llama-3.3-70b-versatile",
+		"messages":    []map[string]interface{}{{"role": "user", "content": prompt}},
+		"temperature": temp, // ✅ ใช้ค่าที่ส่งมา
+		"max_tokens":  maxTokens,
+		"top_p":       0.9,
 	}
 
 	jsonData, _ := json.Marshal(payload)
@@ -41,12 +35,8 @@ func AskGroqCustom(prompt string, maxTokens int) string {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "Network Error กับ Groq จ้า"
-	}
+	resp, _ := client.Do(req)
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	var groqResp struct {
 		Choices []struct {
@@ -55,21 +45,72 @@ func AskGroqCustom(prompt string, maxTokens int) string {
 			} `json:"message"`
 		} `json:"choices"`
 	}
-
-	if err := json.Unmarshal(body, &groqResp); err != nil || len(groqResp.Choices) == 0 {
-		return "Groq สำลักจ้า ลองใหม่นะ"
+	json.Unmarshal(body, &groqResp)
+	if len(groqResp.Choices) == 0 {
+		return ""
 	}
-
-	result := strings.TrimSpace(groqResp.Choices[0].Message.Content)
-
-	// 🛡️ กรองภาษาต่างดาว (Filter)
-	if strings.Contains(result, "<|") || strings.Contains(result, "aff ") {
-		return "อือหือ... เมื่อกี้เครื่องค้างไปนิด เอาเป็นว่าถามใหม่สิ!"
-	}
-
-	fmt.Printf("\n⚡ [Groq Speed]: %v | Result Length: %d\n", time.Since(startTime), len(result))
-	return result
+	return strings.TrimSpace(groqResp.Choices[0].Message.Content)
 }
+
+// ฟังก์ชันเดิมของนาย เปลี่ยนไส้ในให้เรียกตัวใหม่
+func AskGroqCustom(prompt string, maxTokens int) string {
+	return AskGroqCustomWithTemp(prompt, maxTokens, 0.5) // ใช้ 0.5 ตามเดิมสำหรับงานทั่วไป
+}
+
+// AskGroqCustom: ฟังก์ชันหลักที่ยอมให้กำหนดความยาวการตอบได้
+// func AskGroqCustom(prompt string, maxTokens int) string {
+// 	startTime := time.Now()
+// 	apiKey := os.Getenv("GROQ_API_KEY")
+// 	if apiKey == "" {
+// 		return "เออ... ลืมตั้ง GROQ_API_KEY ใน .env นะนาย"
+// 	}
+
+// 	url := "https://api.groq.com/openai/v1/chat/completions"
+// 	payload := map[string]interface{}{
+// 		"model":             "llama-3.3-70b-versatile",
+// 		"messages":          []map[string]interface{}{{"role": "user", "content": prompt}},
+// 		"temperature":       0.5,       // ✅ ลดลงนิดหน่อยเพื่อให้ตอบนิ่งขึ้น
+// 		"max_tokens":        maxTokens, // ✅ ปรับเปลี่ยนตามความเหมาะสมของงาน
+// 		"top_p":             0.8,
+// 		"frequency_penalty": 0.6,
+// 		"presence_penalty":  0.3,
+// 	}
+
+// 	jsonData, _ := json.Marshal(payload)
+// 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+// 	req.Header.Set("Content-Type", "application/json")
+// 	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+// 	client := &http.Client{Timeout: 15 * time.Second}
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		return "Network Error กับ Groq จ้า"
+// 	}
+// 	defer resp.Body.Close()
+
+// 	body, _ := io.ReadAll(resp.Body)
+// 	var groqResp struct {
+// 		Choices []struct {
+// 			Message struct {
+// 				Content string `json:"content"`
+// 			} `json:"message"`
+// 		} `json:"choices"`
+// 	}
+
+// 	if err := json.Unmarshal(body, &groqResp); err != nil || len(groqResp.Choices) == 0 {
+// 		return "Groq สำลักจ้า ลองใหม่นะ"
+// 	}
+
+// 	result := strings.TrimSpace(groqResp.Choices[0].Message.Content)
+
+// 	// 🛡️ กรองภาษาต่างดาว (Filter)
+// 	if strings.Contains(result, "<|") || strings.Contains(result, "aff ") {
+// 		return "อือหือ... เมื่อกี้เครื่องค้างไปนิด เอาเป็นว่าถามใหม่สิ!"
+// 	}
+
+// 	fmt.Printf("\n⚡ [Groq Speed]: %v | Result Length: %d\n", time.Since(startTime), len(result))
+// 	return result
+// }
 
 // AskGroq: ปรับปรุงให้บอท "เล่นตัว" และไม่สปอยล์ข้อมูล
 func AskGroq(secretWord string, description string, question string) string {
@@ -81,15 +122,14 @@ func AskGroq(secretWord string, description string, question string) string {
     [กฎเหล็กการตอบ - สำคัญมาก]
     1. ตอบสั้นๆ กวนๆ จบใน 1 ประโยค และต้องสื่อถึง ใช่ หรือ ไม่ใช่ ห้ามตอบคำเดียวทื่อๆ
     2. ห้ามใช้คำอธิบายที่ให้ไปมาตอบตรงๆ (เช่น ถ้าในข้อมูลบอกว่า "มี 4 ล้อ" ห้ามตอบว่า "มีล้อ" ให้ตอบว่า "เคลื่อนที่ได้ละกัน")
-    3. เน้นตอบแค่ "ใช่", "ไม่ใช่", "ไม่บอก", "ไม่ใกล้เคียง" หรือ "เกือบละ"
+    3. เน้นตอบแค่ "ใช่", "ไม่ใช่", "ไม่บอก", "ไม่ใกล้เคียง" หรือ "เกือบละ" แต่ก็ให้เป็นธรรมชาติ ไม่ต้องแข็งทื่อเกินไป
     4. ห้ามใบ้หมวดหมู่ที่แคบเกินไปเด็ดขาด (เล่นตัวให้ถึงที่สุด)
     5. ห้ามหลุดคำว่า "%s" หรือคำที่สะกดคล้ายกันออกมา
     6. ถ้าผู้เล่นถามกว้าง ให้ตอบกว้างกว่าเดิม
 	7. ห้ามสโคปคำตอบจนแคบเกินไป (เช่น ถ้าเขาถามกว้างๆ ห้ามชิงบอกว่าเป็นสัตว์เลี้ยง)
 	8. หากถูกถามเรื่อง "จำนวนพยางค์" หรือ "ตัวอักษร" ให้ตอบว่า "บอกไม่ได้หรอก"
 	9. หากผู้ใช้ทายใกล้เคียงมาก ให้ยอมรับว่าใกล้เคียงสุดๆ
-	10. ห้ามบอกใบ้โดยตรงเด็ดขาด
-	11. การันตีว่าตอบตามกฎทั้งหมดนี้อย่างเคร่งครัด
+	10. การันตีว่าตอบตามกฎทั้งหมดนี้อย่างเคร่งครัด
 	
 
     คำถามจากผู้เล่น: "%s"`, secretWord, description, secretWord, question)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/supabase-community/supabase-go"
 )
@@ -38,11 +39,17 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	avoidList := strings.Join(usedWords, ", ")
 
-	// ✅ 2. สั่ง AI สุ่มคำใหม่ (เน้นย้ำให้ตอบแค่คำเดียว ห้ามมีอย่างอื่นเจือปน)
-	prompt := fmt.Sprintf(`จงสุ่มคำนามไทย 1 คำ ห้ามซ้ำกับ: %s. ตอบแค่คำนั้นคำเดียว!`, avoidList)
-	secretWord := services.AskGroqRaw(prompt)
-	secretWord = strings.TrimSpace(strings.ReplaceAll(secretWord, ".", ""))
+	// ✅ 2. ปรับ Prompt: สุ่มหมวดหมู่ในระดับ Go เพื่อบีบ AI ให้ไม่ตอบ Pattern เดิม
+	categories := []string{"สิ่งของในบ้าน", "สัตว์ป่า", "สถานที่ท่องเที่ยวในไทย", "อาชีพแปลกๆ", "ของใช้ส่วนตัว"}
+	// ใช้เวลาปัจจุบันสุ่ม Index
+	randomCat := categories[time.Now().UnixNano()%int64(len(categories))]
 
+	prompt := fmt.Sprintf(`จงสุ่มคำนามภาษาไทยในหมวด "%s" มา 1 คำ 
+	กฎ: ต้องไม่ใช่คำที่ง่ายเกินไป (เช่น รถยนต์, แมว, โทรศัพท์) และห้ามซ้ำกับ: %s. 
+	ตอบแค่คำลับนั้นคำเดียวเท่านั้น!`, randomCat, avoidList)
+
+	secretWord := services.AskGroqRaw(prompt) // ตัวนี้จะใช้ Temp 1.2 ที่เราแก้ไว้
+	secretWord = strings.TrimSpace(strings.ReplaceAll(secretWord, ".", ""))
 	descPrompt := fmt.Sprintf(`
     อธิบายลักษณะของ "%s" เป็นภาษาไทย 5 หัวข้อ:
     1.ประเภท... 2.ลักษณะ... 3.การใช้... 4.สถานที่... 5.จุดเด่น...
