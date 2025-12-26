@@ -2,11 +2,9 @@ package main
 
 import (
 	"couple-app/handlers"
-	"couple-app/services"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -14,14 +12,7 @@ import (
 func main() {
 	godotenv.Load()
 
-	go func() {
-		// ✅ เรียกผ่าน services โดยตรงตามโครงสร้างไฟล์ใหม่
-		services.CheckAndNotify()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			services.CheckAndNotify()
-		}
-	}()
+	// ❌ ลบส่วน go func() ที่มี Ticker ออกแล้ว เพื่อป้องกัน Rate Limit
 
 	// --- Auth & Users ---
 	http.HandleFunc("/api/register", handlers.HandleRegister)
