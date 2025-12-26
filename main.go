@@ -2,7 +2,7 @@ package main
 
 import (
 	"couple-app/handlers"
-	"couple-app/services"
+	_ "couple-app/services"
 	"log"
 	"net/http"
 	"os"
@@ -16,10 +16,11 @@ func main() {
 
 	// ✅ ระบบแจ้งเตือนอัตโนมัติเบื้องหลัง
 	go func() {
-		services.CheckAndNotify() // รันทันที 1 ครั้ง
+		// เรียกใช้จาก handlers เพราะเราย้ายฟังก์ชันมาไว้ที่ event_handlers.go แล้ว
+		handlers.CheckAndNotify()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
-			services.CheckAndNotify()
+			handlers.CheckAndNotify()
 		}
 	}()
 
@@ -71,12 +72,15 @@ func main() {
 
 	http.HandleFunc("/api/game/bot-auto-create", handlers.HandleBotAutoCreateGame)
 
+	// main.go
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8080" // ใช้ 8080 เฉพาะตอนอยู่บนเครื่องตัวเอง
 	}
+
 	log.Printf("🚀 Server live on %s", port)
 
+	// ต้องมั่นใจว่าใช้ nil และไม่มี router ตัวอื่นมาขวาง
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
