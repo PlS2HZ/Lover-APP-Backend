@@ -2,7 +2,7 @@ package main
 
 import (
 	"couple-app/handlers"
-	_ "couple-app/services"
+	"couple-app/services"
 	"log"
 	"net/http"
 	"os"
@@ -14,13 +14,12 @@ import (
 func main() {
 	godotenv.Load()
 
-	// ✅ ระบบแจ้งเตือนอัตโนมัติเบื้องหลัง
 	go func() {
-		// เรียกใช้จาก handlers เพราะเราย้ายฟังก์ชันมาไว้ที่ event_handlers.go แล้ว
-		handlers.CheckAndNotify()
+		// ✅ เรียกผ่าน services โดยตรงตามโครงสร้างไฟล์ใหม่
+		services.CheckAndNotify()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
-			handlers.CheckAndNotify()
+			services.CheckAndNotify()
 		}
 	}()
 
@@ -72,15 +71,13 @@ func main() {
 
 	http.HandleFunc("/api/game/bot-auto-create", handlers.HandleBotAutoCreateGame)
 
-	// main.go
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // ใช้ 8080 เฉพาะตอนอยู่บนเครื่องตัวเอง
+		port = "8080"
 	}
 
 	log.Printf("🚀 Server live on %s", port)
 
-	// ต้องมั่นใจว่าใช้ nil และไม่มี router ตัวอื่นมาขวาง
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}

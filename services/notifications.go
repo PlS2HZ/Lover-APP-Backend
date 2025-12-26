@@ -12,7 +12,8 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
-// ก๊อปมาจาก triggerPushNotification เดิม
+var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
+
 func TriggerPushNotification(userID string, title string, message string) {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 	var results []map[string]interface{}
@@ -37,16 +38,16 @@ func TriggerPushNotification(userID string, title string, message string) {
 		})
 		if err == nil {
 			resp.Body.Close()
+		} else {
+			fmt.Printf("❌ Push Error: %v\n", err)
 		}
 	}
 }
 
-// ก๊อปมาจาก sendDiscordEmbed เดิม
-// services/notifications.go
-
 func SendDiscordEmbed(title, description string, color int, fields []map[string]interface{}, imageURL string) {
 	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
 	if webhookURL == "" {
+		fmt.Println("⚠️ DISCORD_WEBHOOK_URL is empty!")
 		return
 	}
 
@@ -56,7 +57,7 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 		"color":       color,
 		"fields":      fields,
 		"footer": map[string]string{
-			"text": "Lover App • " + time.Now().Format("02 Jan 15:04"),
+			"text": "Lover App • " + time.Now().In(loc).Format("02 Jan 15:04"),
 		},
 	}
 
@@ -65,18 +66,33 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 	}
 
 	payload := map[string]interface{}{
-		"content": "@everyone", // แจ้งเตือนทุกคนในห้อง
+		"content": "@everyone",
 		"embeds":  []interface{}{embed},
 	}
 
 	jsonData, _ := json.Marshal(payload)
-	http.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
+
+	// ✅ ปรับปรุง: ใช้ Client ที่มี Timeout เพื่อป้องกัน GoRoutine ค้างบน Server
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
+
+	if err != nil {
+		fmt.Printf("❌ Discord API Error: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		fmt.Printf("❌ Discord returned status: %d\n", resp.StatusCode)
+	} else {
+		fmt.Println("✅ Discord Embed sent successfully")
+	}
 }
 
-// ก๊อปมาจาก checkAndNotify เดิม (เอาไว้รันใน background)
 func CheckAndNotify() {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	now := time.Now().UTC().Truncate(time.Minute).Format("2006-01-02T15:04:00.000Z")
+	// ✅ ปรับให้ใช้เวลาไทย (+7) ตรงกับปฏิทินที่หน้าเว็บ
+	now := time.Now().In(loc).Truncate(time.Minute).Format("2006-01-02T15:04:00.000Z")
 
 	var results []map[string]interface{}
 	client.From("events").Select("*", "exact", false).Eq("event_date", now).ExecuteTo(&results)
