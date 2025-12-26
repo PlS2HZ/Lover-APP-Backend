@@ -44,6 +44,8 @@ func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 			msg = "เค้าส่งบอท Gemini มาท้าทายเธอ! 🤖"
 		}
 		services.TriggerPushNotification(g.GuesserID, "🎮 Mind Game", msg)
+		// ✅ เพิ่มแจ้งเตือนเข้า Discord ด้วย
+		services.SendDiscordEmbed("🎮 Mind Game ใหม่!", "โจทย์: "+msg+"\n🔗 ไปทายกัน: "+APP_URL, 3447003, nil, "")
 	}()
 	json.NewEncoder(w).Encode(results[0])
 }

@@ -14,10 +14,10 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
-var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
+// ✅ ลบ const APP_URL ออกจากที่นี่ เพราะมีอยู่ใน social_handlers.go แล้ว
+// ระบบจะไปดึงจากไฟล์นั้นมาใช้เองอัตโนมัติเพราะอยู่ package handlers เหมือนกัน
 
-// --- Event & Calendar ---
-// handlers/event_handlers.go
+var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
 
 func HandleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
@@ -36,14 +36,17 @@ func HandleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	client.From("events").Insert(row, false, "", "", "").Execute()
 
 	go func() {
-		// ✅ แปลงวันที่ให้อ่านง่ายและเพิ่มรายละเอียด + ลิงก์
-		t, _ := time.Parse(time.RFC3339, ev.EventDate)
+		t, err := time.Parse(time.RFC3339, ev.EventDate)
+		if err != nil {
+			t, _ = time.Parse("2006-01-02T15:04", ev.EventDate)
+		}
 		dateStr := t.In(loc).Format("02/01/2006 15:04")
 
 		msg := fmt.Sprintf("📅 **หัวข้อ:** %s\n🗓️ **วันที่/เวลา:** %s\n📝 **รายละเอียด:** %s\n🔁 **การวนซ้ำ:** %s\n\n🔗 ดูปฏิทิน: %s",
 			ev.Title, dateStr, ev.Description, ev.RepeatType, APP_URL)
 
 		services.SendDiscordEmbed("Calendar Added! 📌", msg, 3447003, nil, "")
+
 		for _, uid := range ev.VisibleTo {
 			services.TriggerPushNotification(uid, "📅 นัดหมายใหม่!", ev.Title+" ("+dateStr+")")
 		}
@@ -72,12 +75,8 @@ func HandleGetMyEvents(w http.ResponseWriter, r *http.Request) {
 	uID := r.URL.Query().Get("user_id")
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 	var data []map[string]interface{}
-
-	// ✅ แก้ไข: ให้ดึงข้อมูลที่ "เราเป็นคนสร้าง" (created_by) หรือ "มีชื่อเราในคนมองเห็น" (visible_to)
-	// ใช้ Or เพื่อความชัวร์ 100% ว่าเจ้าของต้องเห็นงานตัวเอง
 	query := fmt.Sprintf("created_by.eq.%s,visible_to.cs.{%s}", uID, uID)
 	client.From("events").Select("*", "exact", false).Or(query, "").Order("event_date", &postgrest.OrderOpts{Ascending: true}).ExecuteTo(&data)
-
 	json.NewEncoder(w).Encode(data)
 }
 
@@ -92,7 +91,6 @@ func HandleGetHighlights(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// --- Notification Subscriptions ---
 func SaveSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
@@ -131,12 +129,10 @@ func HandleCheckSubscription(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"subscribed": len(results) > 0})
 }
 
-// ✅ ก๊อปปี้มาจากเดิม เพื่อให้ main.go เรียกใช้งานได้
 func CheckAndNotify() {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	// ✅ ดึงเวลาปัจจุบันเป็นโซนไทย และตัดวินาทีออก
 	nowTime := time.Now().In(loc)
-	nowStr := nowTime.Format("2006-01-02T15:04") // ใช้แค่ถึงนาที
+	nowStr := nowTime.Format("2006-01-02T15:04")
 	var results []map[string]interface{}
 	client.From("events").Select("*", "exact", false).Like("event_date", nowStr+"%").ExecuteTo(&results)
 
@@ -147,13 +143,11 @@ func CheckAndNotify() {
 			dateVal := ev["event_date"].(string)
 			repeat := ev["repeat_type"].(string)
 
-			// ✅ แปลงวันที่ให้อ่านง่าย
 			t, _ := time.Parse(time.RFC3339, dateVal)
-			formattedDate := t.Local().Format("02/01/2006 15:04")
+			formattedDate := t.In(loc).Format("02/01/2006 15:04")
 
-			// ✅ ปรับตามเงื่อนไข: เพิ่ม หัวข้อ, วันที่/เวลา, รายละเอียด, การวนซ้ำ
 			msg := fmt.Sprintf("📌 **หัวข้อ:** %s\n🗓️ **วันที่/เวลา:** %s\n📝 **รายละเอียด:** %s\n🔁 **การวนซ้ำ:** %s\n\n🔗 เปิดแอป: %s",
-				title, formattedDate, desc, repeat, "https://lover-frontend-ashen.vercel.app/")
+				title, formattedDate, desc, repeat, APP_URL)
 
 			services.SendDiscordEmbed("💖 แจ้งเตือนวันสำคัญ!", msg, 16761035, nil, "")
 		}

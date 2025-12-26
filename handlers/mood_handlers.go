@@ -59,7 +59,7 @@ func HandleSaveMood(w http.ResponseWriter, r *http.Request) {
 
 		// ปรับข้อความตามเงื่อนไข: ใส่ Mood Name (คลั่งรัก) และ รายละเอียดความรู้สึก
 		msg := fmt.Sprintf("**%s** ความรู้สึกตอนนี้:\n✨ **Mood:** %s %s\n💭 **รายละเอียดความรู้สึก:** %s\n\n🔗 ดูความรู้สึกแฟน: %s",
-			username, m.MoodEmoji, m.MoodName, m.MoodText, "https://lover-frontend-ashen.vercel.app/")
+			username, m.MoodEmoji, m.MoodName, m.MoodText, APP_URL)
 
 		services.SendDiscordEmbed("อัปเดตอารมณ์ความรู้สึก 💖", msg, 16738740, nil, "")
 

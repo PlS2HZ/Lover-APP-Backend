@@ -41,7 +41,7 @@ func HandleSaveWishlist(w http.ResponseWriter, r *http.Request) {
 		if item.ItemURL != "" {
 			msg += "\n🔗 **ลิงก์สินค้า:** " + item.ItemURL
 		}
-		msg += "\n\n🔗 จัดการ Wishlist: https://lover-frontend-ashen.vercel.app/"
+		msg += "\n\n🔗 จัดการ Wishlist: " + APP_URL
 
 		services.SendDiscordEmbed("Wishlist Added! ✨", msg, 16753920, nil, "")
 	}()
