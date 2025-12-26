@@ -76,17 +76,14 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ✅ แก้ไข: เพิ่ม Log เพื่อเช็คการทำงานบน Production
 	go func() {
-		// ✅ แก้ไข: ปรับการ Parse เวลาให้รองรับ Format จาก HTML datetime-local (2006-01-02T15:04)
+		fmt.Println("🚀 Starting Discord Notification GoRoutine...")
+
 		parseTime := func(iso string) string {
-			// ลอง parse แบบ ISO8601 ก่อน (RFC3339)
 			t, err := time.Parse(time.RFC3339, iso)
 			if err != nil {
-				// ถ้าพลาด ให้ลอง parse แบบ HTML Input datetime-local
-				t, err = time.Parse("2006-01-02T15:04", iso)
-			}
-			if err != nil {
-				return iso // ถ้าไม่ได้จริงๆ ให้ส่งค่าดิบกลับไป
+				t, _ = time.Parse("2006-01-02T15:04", iso)
 			}
 			return t.Format("02/01/2006 เวลา 15:04")
 		}
@@ -94,18 +91,21 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		formattedStart := parseTime(req.StartTime)
 		formattedEnd := parseTime(req.EndTime)
 
-		// ✅ แก้ไข: เพิ่มหัวข้อ "ถึงคุณ:" และจัดระเบียบข้อความใหม่
 		msg := fmt.Sprintf("👤 **จาก:** %s\n🎯 **ถึงคุณ:** %s\n🏷️ **ประเภท:** %s\n📖 **รายละเอียด:** %s\n⏰ **เริ่ม:** %s\n🏁 **สิ้นสุด:** %s\n⏳ **ระยะเวลา:** %s\n\n🔗 เข้าแอปที่นี่: %s",
 			sName, req.ReceiverUsername, req.Header, req.Title, formattedStart, formattedEnd, req.Duration, APP_URL)
 
+		// เรียกใช้บริการส่ง Discord
 		services.SendDiscordEmbed("💌 มีคำขอใหม่รอการอนุมัติ!", msg, 16738740, nil, req.ImageURL)
+		fmt.Println("✅ Discord Embed sent command triggered")
+
 		services.TriggerPushNotification(rID, "💌 มีคำขอใหม่จาก "+sName, req.Title)
+		fmt.Println("✅ Push Notification triggered")
 	}()
 
 	w.WriteHeader(http.StatusCreated)
 }
 
-// HandleUpdateStatus อัปเดตสถานะ และส่งแจ้งเตือนพร้อมคอมเมนต์ (เหมือนเดิม)
+// HandleUpdateStatus อัปเดตสถานะ และส่งแจ้งเตือน
 func HandleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
@@ -138,6 +138,7 @@ func HandleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		go func() {
+			fmt.Println("🚀 Updating status on Discord...")
 			commentSection := body.Comment
 			if commentSection == "" {
 				commentSection = "-"
