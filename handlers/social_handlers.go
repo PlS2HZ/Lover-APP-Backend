@@ -22,7 +22,6 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// โครงสร้างรับข้อมูลจาก Frontend
 	var req struct {
 		SenderID         string `json:"sender_id"`
 		ReceiverUsername string `json:"receiver_username"`
@@ -42,7 +41,6 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 
-	// 1. หา ID คนรับ
 	var targetUser []map[string]interface{}
 	client.From("users").Select("id", "exact", false).Eq("username", req.ReceiverUsername).ExecuteTo(&targetUser)
 	if len(targetUser) == 0 {
@@ -51,7 +49,6 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	rID := targetUser[0]["id"].(string)
 
-	// 2. หาชื่อคนส่ง
 	var senderUser []map[string]interface{}
 	client.From("users").Select("username", "exact", false).Eq("id", req.SenderID).ExecuteTo(&senderUser)
 	sName := "Unknown"
@@ -59,8 +56,6 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		sName = senderUser[0]["username"].(string)
 	}
 
-	// 3. บันทึกลงตาราง requests (แมปตัวแปรให้ตรงกับ Schema)
-	// title: เก็บรายละเอียดคำขอ, description: เก็บระยะเวลารวม
 	dbRow := map[string]interface{}{
 		"category":      req.Header,
 		"title":         req.Title,
@@ -81,19 +76,27 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. แจ้งเตือน Discord & Push
 	go func() {
-		// ✅ ปรับรูปแบบการแสดงผลเวลาใน Discord ให้สวยงาม
+		// ✅ แก้ไข: ปรับการ Parse เวลาให้รองรับ Format จาก HTML datetime-local (2006-01-02T15:04)
 		parseTime := func(iso string) string {
-			t, _ := time.Parse(time.RFC3339, iso)
-			return t.In(loc).Format("02/01/2006 เวลา 15:04")
+			// ลอง parse แบบ ISO8601 ก่อน (RFC3339)
+			t, err := time.Parse(time.RFC3339, iso)
+			if err != nil {
+				// ถ้าพลาด ให้ลอง parse แบบ HTML Input datetime-local
+				t, err = time.Parse("2006-01-02T15:04", iso)
+			}
+			if err != nil {
+				return iso // ถ้าไม่ได้จริงๆ ให้ส่งค่าดิบกลับไป
+			}
+			return t.Format("02/01/2006 เวลา 15:04")
 		}
-		// ✅ เปลี่ยน T เป็นคำว่า " เวลา " เพื่อให้อ่านง่ายขึ้น
+
 		formattedStart := parseTime(req.StartTime)
 		formattedEnd := parseTime(req.EndTime)
 
-		msg := fmt.Sprintf("👤 **จาก:** %s\n🏷️ **ประเภท:** %s\n📖 **รายละเอียดคำขอ:** %s\n⏰ **เริ่ม:** %s\n🏁 **สิ้นสุด:** %s\n⏳ **ระยะเวลารวม:** %s\n\n🔗 เข้าแอปที่นี่: %s",
-			sName, req.Header, req.Title, formattedStart, formattedEnd, req.Duration, APP_URL)
+		// ✅ แก้ไข: เพิ่มหัวข้อ "ถึงคุณ:" และจัดระเบียบข้อความใหม่
+		msg := fmt.Sprintf("👤 **จาก:** %s\n🎯 **ถึงคุณ:** %s\n🏷️ **ประเภท:** %s\n📖 **รายละเอียด:** %s\n⏰ **เริ่ม:** %s\n🏁 **สิ้นสุด:** %s\n⏳ **ระยะเวลา:** %s\n\n🔗 เข้าแอปที่นี่: %s",
+			sName, req.ReceiverUsername, req.Header, req.Title, formattedStart, formattedEnd, req.Duration, APP_URL)
 
 		services.SendDiscordEmbed("💌 มีคำขอใหม่รอการอนุมัติ!", msg, 16738740, nil, req.ImageURL)
 		services.TriggerPushNotification(rID, "💌 มีคำขอใหม่จาก "+sName, req.Title)
@@ -102,7 +105,7 @@ func HandleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// HandleUpdateStatus อัปเดตสถานะ อนุมัติ/ปฏิเสธ
+// HandleUpdateStatus อัปเดตสถานะ และส่งแจ้งเตือนพร้อมคอมเมนต์ (เหมือนเดิม)
 func HandleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
@@ -126,6 +129,7 @@ func HandleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		senderID := reqData[0]["sender_id"].(string)
 		title := reqData[0]["title"].(string)
 		rName := reqData[0]["receiver_name"].(string)
+
 		statusTxt := "✅ ได้รับอนุมัติแล้ว ✨"
 		color := 5763719
 		if body.Status == "rejected" {
@@ -134,16 +138,26 @@ func HandleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		go func() {
-			msg := fmt.Sprintf("📢 **คำขอ:** %s\n🎭 **สถานะ:** %s\n👤 **โดย:** %s\n💬 **เหตุผล:** %s\n\n🔗 ตรวจสอบ: %s",
-				title, statusTxt, rName, body.Comment, APP_URL)
+			commentSection := body.Comment
+			if commentSection == "" {
+				commentSection = "-"
+			}
+
+			msg := fmt.Sprintf("📢 **คำขอ:** %s\n🎭 **สถานะ:** %s\n👤 **โดย:** %s\n💬 **ข้อความ:** %s\n\n🔗 ตรวจสอบ: %s",
+				title, statusTxt, rName, commentSection, APP_URL)
+
 			services.SendDiscordEmbed("🔔 อัปเดตสถานะคำขอ", msg, color, nil, "")
-			services.TriggerPushNotification(senderID, "📢 สถานะคำขอ: "+title, statusTxt)
+
+			pushMsg := statusTxt
+			if body.Comment != "" {
+				pushMsg = fmt.Sprintf("%s (%s)", statusTxt, body.Comment)
+			}
+			services.TriggerPushNotification(senderID, "📢 สถานะคำขอ: "+title, pushMsg)
 		}()
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// HandleGetMyRequests ดึงรายการทั้งหมดที่เกี่ยวข้องกับผู้ใช้
 func HandleGetMyRequests(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
