@@ -33,7 +33,9 @@ func TriggerPushNotification(userID string, title string, message string) {
 			VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
 			TTL:             30,
 		})
-		if err == nil {
+		if err != nil {
+			fmt.Printf("❌ [PUSH ERROR] %v\n", err)
+		} else {
 			resp.Body.Close()
 		}
 	}
@@ -42,7 +44,7 @@ func TriggerPushNotification(userID string, title string, message string) {
 func SendDiscordEmbed(title, description string, color int, fields []map[string]interface{}, imageURL string) {
 	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
 	if webhookURL == "" {
-		fmt.Println("❌ [ERROR] DISCORD_WEBHOOK_URL IS EMPTY IN RENDER!")
+		fmt.Println("❌ [ERROR] NO WEBHOOK URL")
 		return
 	}
 
@@ -62,24 +64,24 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 		"content": "@everyone",
 		"embeds":  []interface{}{embed},
 	}
-
 	jsonData, _ := json.Marshal(payload)
 
-	// ✅ ใช้ Client ที่มี Timeout เพื่อความชัวร์
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
 
 	if err != nil {
-		fmt.Printf("❌ [CRITICAL] DISCORD API CONNECTION ERROR: %v\n", err)
+		fmt.Printf("❌ [CRITICAL] API CONNECTION ERROR: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fmt.Printf("❌ [DISCORD ERROR] STATUS CODE: %d\n", resp.StatusCode)
+	// ✅ ตรวจสอบ Status จริงจาก Discord
+	if resp.StatusCode == 429 {
+		fmt.Println("⚠️ [DISCORD WARNING] RATE LIMITED! PLEASE WAIT 5 MIN.")
+	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		fmt.Printf("❌ [DISCORD ERROR] STATUS: %d\n", resp.StatusCode)
 	} else {
-		// ✅ เปลี่ยนข้อความ Log เพื่อยืนยันว่าใช้โค้ดใหม่แล้ว
-		fmt.Println("⭐️ [SUCCESS] DISCORD MESSAGE SENT SUCCESSFULLY!")
+		fmt.Println("⭐️ [SUCCESS] DISCORD MESSAGE SENT!")
 	}
 }
 
