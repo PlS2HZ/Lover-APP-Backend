@@ -34,6 +34,7 @@ type Event struct {
 	RepeatType   string   `json:"repeat_type"`
 	IsSpecial    bool     `json:"is_special"`
 	CategoryType string   `json:"category_type"`
+	IsNotified   bool     `json:"is_notified"`
 }
 
 type PushSubscription struct {

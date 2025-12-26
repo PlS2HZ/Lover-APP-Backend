@@ -15,7 +15,6 @@ import (
 )
 
 // ✅ ลบ const APP_URL ออกจากที่นี่ เพราะมีอยู่ใน social_handlers.go แล้ว
-// ระบบจะไปดึงจากไฟล์นั้นมาใช้เองอัตโนมัติเพราะอยู่ package handlers เหมือนกัน
 
 var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
 
@@ -28,10 +27,15 @@ func HandleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 
 	row := map[string]interface{}{
-		"event_date": ev.EventDate, "title": ev.Title, "description": ev.Description,
-		"created_by": ev.CreatedBy, "visible_to": ev.VisibleTo,
-		"repeat_type": ev.RepeatType, "category_type": ev.CategoryType,
-		"is_special": ev.CategoryType == "special",
+		"event_date":    ev.EventDate,
+		"title":         ev.Title,
+		"description":   ev.Description,
+		"created_by":    ev.CreatedBy,
+		"visible_to":    ev.VisibleTo,
+		"repeat_type":   ev.RepeatType,
+		"category_type": ev.CategoryType,
+		"is_special":    ev.CategoryType == "special",
+		"is_notified":   false, // ✅ กำหนดเป็น false เสมอเมื่อเริ่มสร้าง
 	}
 	client.From("events").Insert(row, false, "", "", "").Execute()
 
@@ -134,10 +138,14 @@ func CheckAndNotify() {
 	nowTime := time.Now().In(loc)
 	nowStr := nowTime.Format("2006-01-02T15:04")
 	var results []map[string]interface{}
-	client.From("events").Select("*", "exact", false).Like("event_date", nowStr+"%").ExecuteTo(&results)
+
+	// ✅ ดึงเฉพาะนัดหมายที่เวลาตรงกันและยังไม่ได้แจ้งเตือน
+	client.From("events").Select("*", "exact", false).Like("event_date", nowStr+"%").Eq("is_notified", "false").ExecuteTo(&results)
 
 	if len(results) > 0 {
 		for _, ev := range results {
+			// ✅ ดึง ID จากตัวแปรลูป ev เพื่อแก้บั๊ก undefined id
+			eventID := ev["id"].(string)
 			title := ev["title"].(string)
 			desc := ev["description"].(string)
 			dateVal := ev["event_date"].(string)
@@ -150,6 +158,16 @@ func CheckAndNotify() {
 				title, formattedDate, desc, repeat, APP_URL)
 
 			services.SendDiscordEmbed("💖 แจ้งเตือนวันสำคัญ!", msg, 16761035, nil, "")
+
+			// ✅ อัปเดตสถานะ is_notified เป็น true ทันทีหลังส่ง เพื่อป้องกันการยิงซ้ำ
+			client.From("events").Update(map[string]interface{}{"is_notified": true}, "", "").Eq("id", eventID).Execute()
+
+			// ✅ ส่ง Push Notification เพิ่มเติม
+			if visibleTo, ok := ev["visible_to"].([]interface{}); ok {
+				for _, uid := range visibleTo {
+					go services.TriggerPushNotification(uid.(string), "🔔 ถึงเวลาแล้วนะ!", title)
+				}
+			}
 		}
 	}
 }
