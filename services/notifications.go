@@ -74,7 +74,8 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		fmt.Println("⚠️ [RATE LIMIT] Discord blocks us. Slow down!")
+		retryAfter := resp.Header.Get("Retry-After") // บอกเป็นวินาทีว่าต้องรอนานแค่ไหน
+		fmt.Printf("⚠️ [RATE LIMIT] ต้องรออีก %s วินาที ถึงจะส่งได้ใหม่\n", retryAfter)
 	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		fmt.Println("⭐️ [SUCCESS] Sent to Discord")
 	}
