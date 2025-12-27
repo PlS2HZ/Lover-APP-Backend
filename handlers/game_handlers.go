@@ -15,9 +15,8 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
-// ✅ ฟังก์ชันช่วยเช็คคำผิด (ห้ามลบ!)
+// ✅ ห้ามลบ! (คงเดิม)
 func isCloseEnough(s1, s2 string) bool {
-	// ถ้าทายผิดไม่เกิน 2 ตัวอักษร และไม่ใช่การพิมพ์ถูกเป๊ะ ให้ถือว่าสะกดผิด
 	dist := utils.LevenshteinDistance(s1, s2)
 	return dist <= 2 && dist > 0
 }
@@ -28,7 +27,11 @@ func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	}
 	var g models.HeartGame
 	json.NewDecoder(r.Body).Decode(&g)
+
+	// ดึงข้อมูล User เพื่อหาชื่อคนสร้าง (Creator Name)
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
+
+	// --- โค้ดส่วนเดิม ---
 	row := map[string]interface{}{
 		"host_id":     g.HostID,
 		"guesser_id":  g.GuesserID,
@@ -38,17 +41,32 @@ func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []map[string]interface{}
 	client.From("heart_games").Insert(row, false, "", "", "").ExecuteTo(&results)
+
 	go func() {
+		// หาชื่อผู้สร้างเพื่อแจ้งเตือน
+		var userData []map[string]interface{}
+		client.From("users").Select("username", "", false).Eq("id", g.HostID).ExecuteTo(&userData)
+		username := "ใครบางคน"
+		if len(userData) > 0 {
+			username = userData[0]["username"].(string)
+		}
+
 		msg := "มีคำทายรออยู่ในใจเค้า... ❤️"
 		if g.UseBot {
 			msg = "เค้าส่งบอท Gemini มาท้าทายเธอ! 🤖"
 		}
+
+		// 1. ส่ง Push
 		services.TriggerPushNotification(g.GuesserID, "🎮 Mind Game", msg)
-		// ✅ เพิ่มแจ้งเตือนเข้า Discord ด้วย
-		services.SendDiscordEmbed("🎮 Mind Game ใหม่!", "โจทย์: "+msg+"\n🔗 ไปทายกัน: "+APP_URL, 3447003, nil, "")
+
+		// 2. ส่งแจ้งเตือนด่านใหม่เข้า Discord (เรียกฟังก์ชันใหม่)
+		services.SendMindGameNotification(username)
 	}()
+
 	json.NewEncoder(w).Encode(results[0])
 }
+
+// --- ฟังก์ชันอื่นๆ ด้านล่างคงเดิมทั้งหมด ห้ามลบ ---
 
 func HandleGenerateAIDescription(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
@@ -112,10 +130,8 @@ func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
 				botAnswer = "ถูกต้อง"
 				client.From("heart_games").Update(map[string]interface{}{"status": "finished"}, "", "").Eq("id", heartGameID).Execute()
 			} else if isCloseEnough(cleanInput, secretWord) {
-				// ✅ ระบบดักคำสะกดผิด (Typo)
 				botAnswer = fmt.Sprintf("นายหมายถึง '%s' หรือเปล่า? เกือบถูกแล้วสะกดอีกนิด!", secretWord)
 			} else if strings.Contains(cleanInput, "ขอคำใบ้") || strings.Contains(cleanInput, "ใบ้หน่อย") {
-				// ✅ ส่งเฉพาะ description ไปให้บอทวิเคราะห์คำใบ้ใหม่
 				botAnswer = services.AskGroqHint(description)
 			} else {
 				botAnswer = services.AskGroq(secretWord, description, msg.Message)
