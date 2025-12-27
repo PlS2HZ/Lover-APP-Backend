@@ -15,11 +15,13 @@ import (
 	"github.com/supabase-community/supabase-go"
 )
 
-// ✅ ห้ามลบ! (คงเดิม)
+// ✅ ห้ามลบ! คงเดิม
 func isCloseEnough(s1, s2 string) bool {
 	dist := utils.LevenshteinDistance(s1, s2)
 	return dist <= 2 && dist > 0
 }
+
+// ... (HandleCreateHeartGame คงเดิมทั้งหมด ไม่ลบ)
 
 func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
@@ -27,11 +29,7 @@ func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	}
 	var g models.HeartGame
 	json.NewDecoder(r.Body).Decode(&g)
-
-	// ดึงข้อมูล User เพื่อหาชื่อคนสร้าง (Creator Name)
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-
-	// --- โค้ดส่วนเดิม ---
 	row := map[string]interface{}{
 		"host_id":     g.HostID,
 		"guesser_id":  g.GuesserID,
@@ -41,33 +39,90 @@ func HandleCreateHeartGame(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []map[string]interface{}
 	client.From("heart_games").Insert(row, false, "", "", "").ExecuteTo(&results)
-
 	go func() {
-		// หาชื่อผู้สร้างเพื่อแจ้งเตือน
 		var userData []map[string]interface{}
 		client.From("users").Select("username", "", false).Eq("id", g.HostID).ExecuteTo(&userData)
 		username := "ใครบางคน"
 		if len(userData) > 0 {
 			username = userData[0]["username"].(string)
 		}
-
 		msg := "มีคำทายรออยู่ในใจเค้า... ❤️"
 		if g.UseBot {
 			msg = "เค้าส่งบอท Gemini มาท้าทายเธอ! 🤖"
 		}
-
-		// 1. ส่ง Push
 		services.TriggerPushNotification(g.GuesserID, "🎮 Mind Game", msg)
-
-		// 2. ส่งแจ้งเตือนด่านใหม่เข้า Discord (เรียกฟังก์ชันใหม่)
 		services.SendMindGameNotification(username)
 	}()
-
 	json.NewEncoder(w).Encode(results[0])
 }
 
-// --- ฟังก์ชันอื่นๆ ด้านล่างคงเดิมทั้งหมด ห้ามลบ ---
+// ✅ อัปเกรด: HandleAskQuestion ฉลาดและจริงใจ 100%
+func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
+	if utils.EnableCORS(&w, r) {
+		return
+	}
+	var msg struct {
+		GameID   string `json:"game_id"`
+		SenderID string `json:"sender_id"`
+		Message  string `json:"message"`
+	}
+	json.NewDecoder(r.Body).Decode(&msg)
 
+	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
+	var sessionData []map[string]interface{}
+	client.From("game_sessions").Select("game_id", "", false).Eq("id", msg.GameID).ExecuteTo(&sessionData)
+
+	if len(sessionData) > 0 {
+		heartGameID := sessionData[0]["game_id"].(string)
+		var gameData []map[string]interface{}
+		client.From("heart_games").Select("*", "", false).Eq("id", heartGameID).ExecuteTo(&gameData)
+
+		if len(gameData) > 0 {
+			secretWord := strings.TrimSpace(gameData[0]["secret_word"].(string))
+			description := ""
+			if gameData[0]["description"] != nil {
+				description = gameData[0]["description"].(string)
+			}
+
+			cleanInput := strings.TrimSpace(msg.Message)
+			lowInput := strings.ToLower(cleanInput)
+			lowSecret := strings.ToLower(secretWord)
+			botAnswer := ""
+
+			// 🌟 1. [CRITICAL] เช็คคำตอบที่ถูกต้องก่อน (ห้ามผ่าน AI เด็ดขาด)
+			if strings.Contains(lowInput, lowSecret) {
+				botAnswer = fmt.Sprintf("ถูกต้อง! ใช่แล้ว... '%s' นั่นแหละ เก่งมาก!", secretWord)
+				client.From("heart_games").Update(map[string]interface{}{"status": "finished"}, "", "").Eq("id", heartGameID).Execute()
+
+				// บันทึกและ Return ทันทีเพื่อไม่ให้หลุดไปหา AI
+				client.From("game_messages").Insert(map[string]interface{}{
+					"game_id": heartGameID, "sender_id": msg.SenderID, "message": msg.Message, "answer": botAnswer,
+				}, false, "", "", "").Execute()
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
+
+			// 🌟 2. เช็คสะกดผิด (ห้ามผ่าน AI เช่นกัน)
+			if isCloseEnough(lowInput, lowSecret) {
+				botAnswer = fmt.Sprintf("นายหมายถึง '%s' หรือเปล่า? เกือบถูกแล้วสะกดอีกนิดเดียว!", secretWord)
+			} else if strings.Contains(lowInput, "ใบ้") || strings.Contains(lowInput, "คำใบ้") {
+				botAnswer = services.AskGroqHint(description)
+			} else {
+				// 🌟 3. ส่งให้ AI ตอบด้วย Prompt ที่นายต้องการ
+				botAnswer = services.AskGroq(secretWord, description, msg.Message)
+			}
+
+			client.From("game_messages").Insert(map[string]interface{}{
+				"game_id": heartGameID, "sender_id": msg.SenderID, "message": msg.Message, "answer": botAnswer,
+			}, false, "", "", "").Execute()
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+// ... (HandleGenerateAIDescription, HandleStartHeartGame, HandleGetLevels, HandleCreateGame คงเดิม)
 func HandleGenerateAIDescription(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
@@ -94,57 +149,6 @@ func HandleStartHeartGame(w http.ResponseWriter, r *http.Request) {
 		"start_time": time.Now(),
 	}, "", "").Eq("id", gameID).Execute()
 	w.WriteHeader(http.StatusOK)
-}
-
-func HandleAskQuestion(w http.ResponseWriter, r *http.Request) {
-	if utils.EnableCORS(&w, r) {
-		return
-	}
-	var msg struct {
-		GameID   string `json:"game_id"`
-		SenderID string `json:"sender_id"`
-		Message  string `json:"message"`
-	}
-	json.NewDecoder(r.Body).Decode(&msg)
-
-	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	var sessionData []map[string]interface{}
-	client.From("game_sessions").Select("game_id", "", false).Eq("id", msg.GameID).ExecuteTo(&sessionData)
-
-	if len(sessionData) > 0 {
-		heartGameID := sessionData[0]["game_id"].(string)
-		var gameData []map[string]interface{}
-		client.From("heart_games").Select("*", "", false).Eq("id", heartGameID).ExecuteTo(&gameData)
-
-		if len(gameData) > 0 {
-			secretWord := gameData[0]["secret_word"].(string)
-			description := ""
-			if gameData[0]["description"] != nil {
-				description = gameData[0]["description"].(string)
-			}
-
-			cleanInput := strings.TrimSpace(msg.Message)
-			botAnswer := ""
-
-			if cleanInput == secretWord {
-				botAnswer = "ถูกต้อง"
-				client.From("heart_games").Update(map[string]interface{}{"status": "finished"}, "", "").Eq("id", heartGameID).Execute()
-			} else if isCloseEnough(cleanInput, secretWord) {
-				botAnswer = fmt.Sprintf("นายหมายถึง '%s' หรือเปล่า? เกือบถูกแล้วสะกดอีกนิด!", secretWord)
-			} else if strings.Contains(cleanInput, "ขอคำใบ้") || strings.Contains(cleanInput, "ใบ้หน่อย") {
-				botAnswer = services.AskGroqHint(description)
-			} else {
-				botAnswer = services.AskGroq(secretWord, description, msg.Message)
-			}
-
-			client.From("game_messages").Insert(map[string]interface{}{
-				"game_id": heartGameID, "sender_id": msg.SenderID, "message": msg.Message, "answer": botAnswer,
-			}, false, "", "", "").Execute()
-			w.WriteHeader(http.StatusCreated)
-			return
-		}
-	}
-	w.WriteHeader(http.StatusCreated)
 }
 
 func HandleGetLevels(w http.ResponseWriter, r *http.Request) {
