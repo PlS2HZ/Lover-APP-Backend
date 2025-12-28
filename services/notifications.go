@@ -17,17 +17,17 @@ var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
 
 // ✅ ฟังก์ชันหัวใจ: เลือก Webhook ตามสภาพแวดล้อม
 func getTargetWebhook() string {
-	// 🌟 บังคับ: ถ้ามี TEST_WEBHOOK_URL ใน .env (ซึ่งมีเฉพาะในเครื่องนาย) ให้ใช้อันนั้นเสมอ
 	testURL := os.Getenv("TEST_WEBHOOK_URL")
 	appEnv := os.Getenv("APP_ENV")
 
+	// ถ้าเครื่องมีป้ายแปะว่า local (MacBook) บังคับลงช่องเทสเสมอ
 	if appEnv == "local" && testURL != "" {
 		return testURL
 	}
 	return os.Getenv("DISCORD_WEBHOOK_URL")
 }
 
-// TriggerPushNotification ส่งแจ้งเตือน PWA (คงเดิมตามคำสั่ง)
+// TriggerPushNotification ส่งแจ้งเตือน PWA (คงเดิม)
 func TriggerPushNotification(userID string, title string, message string) {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 	var results []map[string]interface{}
@@ -55,16 +55,28 @@ func TriggerPushNotification(userID string, title string, message string) {
 	}
 }
 
-// ✅ อัปเกรด: SendDiscordEmbed (คงฟังก์ชันเดิมแต่ปรับปรุง Logic การเลือก Webhook ให้แม่นยำ 100%)
+// ✅ อัปเกรดสูงสุด: SendDiscordEmbed แยกโลกจริงกับโลกเทสเด็ดขาด
 func SendDiscordEmbed(title, description string, color int, fields []map[string]interface{}, imageURL string) {
 	appEnv := os.Getenv("APP_ENV")
 	webhookURL := getTargetWebhook()
 
-	if appEnv != "local" && (strings.Contains(title, "ทดสอบ") || strings.Contains(description, "ทดสอบ")) {
-		fmt.Println("🔄 [RENDER] Rerouting test notification to TEST_WEBHOOK")
-		webhookURL = os.Getenv("TEST_WEBHOOK_URL") // มั่นใจว่ามีตัวแปรนี้ใน Render ด้วยนะ
-		if webhookURL == "" {
-			return // ถ้าไม่มี Webhook เทสใน Render ค่อยหยุดส่ง
+	// 🔍 ตรวจสอบเนื้อหา: ครอบคลุมทั้ง ทดสอบ, เทส, test, TEST
+	fullText := strings.ToLower(title + " " + description)
+	isTestContent := strings.Contains(fullText, "ทดสอบ") ||
+		strings.Contains(fullText, "เทส") ||
+		strings.Contains(fullText, "test")
+
+	if isTestContent {
+		// 🚀 ถ้าเป็น Render (ซึ่งไม่มี APP_ENV=local) ให้เปลี่ยนเส้นทางไปช่องเทส
+		if appEnv != "local" {
+			testURL := os.Getenv("TEST_WEBHOOK_URL")
+			if testURL != "" {
+				fmt.Println("🔄 [RENDER] Rerouting test content to TEST_WEBHOOK")
+				webhookURL = testURL
+			} else {
+				fmt.Println("🚫 [RENDER] Ignored test content (No TEST_WEBHOOK_URL set)")
+				return
+			}
 		}
 	}
 
@@ -72,9 +84,9 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 		return
 	}
 
-	// ถ้าเป็นเครื่อง Local ให้หน่วงเวลาเล็กน้อยกันโดน Discord เพ่งเล็ง
-	if os.Getenv("APP_ENV") == "local" {
-		time.Sleep(1 * time.Second) // กัน Rate Limit เวลาเทส
+	// ถ้าเป็นเครื่อง Local ให้หน่วงเวลาเล็กน้อยกัน Rate Limit
+	if appEnv == "local" {
+		time.Sleep(1 * time.Second)
 	}
 
 	payload := map[string]interface{}{
@@ -106,7 +118,7 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 		retryAfter := resp.Header.Get("Retry-After")
 		fmt.Printf("⚠️ [RATE LIMIT] ต้องรออีก %s วินาที\n", retryAfter)
 	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("⭐️ [SUCCESS] Sent to Discord (%s)\n", os.Getenv("APP_ENV"))
+		fmt.Printf("⭐️ [SUCCESS] Sent to Discord (Mode: %s)\n", appEnv)
 	}
 }
 
@@ -142,7 +154,6 @@ func CheckAndNotify() {
 
 				msg := fmt.Sprintf("💖 แจ้งเตือนวันสำคัญ!\n📌 **หัวข้อ:** %s\n📝 **รายละเอียด:** %s\n🔁 **วนซ้ำ:** %s", title, desc, repeat)
 
-				// เรียกใช้ SendDiscordEmbed ที่อัปเกรดแล้ว
 				SendDiscordEmbed("แจ้งเตือน!", msg, 16761035, nil, "")
 
 				client.From("events").Update(map[string]interface{}{"is_notified": true}, "", "").Eq("id", id).Execute()
@@ -168,6 +179,5 @@ func SendMindGameNotification(creatorName string) {
 	msg := fmt.Sprintf("✨ **มีด่านใหม่มาท้าทาย!**\n👤 สร้างโดย: **%s**\n\nลับสมองรอไว้เลย พร้อมเล่นรึยัง?\n🔗 เข้าไปเล่นที่นี่: %s",
 		creatorName, appURL)
 
-	// เรียกใช้ SendDiscordEmbed ที่อัปเกรดแล้ว
 	SendDiscordEmbed(title, msg, 3066993, nil, "")
 }
