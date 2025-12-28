@@ -73,6 +73,12 @@ func main() {
 	http.HandleFunc("/api/game/generate-description", handlers.HandleGenerateAIDescription)
 	http.HandleFunc("/api/game/bot-auto-create", handlers.HandleBotAutoCreateGame)
 
+	http.HandleFunc("/api/memory-quiz/save", handlers.HandleSaveMemory)
+	http.HandleFunc("/api/memory-quiz/random", handlers.HandleGetRandomQuiz)
+	http.HandleFunc("/api/memory-quiz/all", handlers.HandleGetAllMemories)
+	http.HandleFunc("/api/memory-quiz/submit", handlers.HandleSubmitQuizResponse)
+	http.HandleFunc("/api/memory-quiz/delete", handlers.HandleDeleteMemory)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000" // ปรับเป็น 10000 ตามที่เราคุยกัน
