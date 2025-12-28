@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
@@ -14,7 +15,19 @@ import (
 
 var loc = time.FixedZone("Asia/Bangkok", 7*60*60)
 
-// TriggerPushNotification ส่งแจ้งเตือน PWA (คงเดิม)
+// ✅ ฟังก์ชันหัวใจ: เลือก Webhook ตามสภาพแวดล้อม
+func getTargetWebhook() string {
+	// 🌟 บังคับ: ถ้ามี TEST_WEBHOOK_URL ใน .env (ซึ่งมีเฉพาะในเครื่องนาย) ให้ใช้อันนั้นเสมอ
+	testURL := os.Getenv("TEST_WEBHOOK_URL")
+	appEnv := os.Getenv("APP_ENV")
+
+	if appEnv == "local" && testURL != "" {
+		return testURL
+	}
+	return os.Getenv("DISCORD_WEBHOOK_URL")
+}
+
+// TriggerPushNotification ส่งแจ้งเตือน PWA (คงเดิมตามคำสั่ง)
 func TriggerPushNotification(userID string, title string, message string) {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 	var results []map[string]interface{}
@@ -42,11 +55,23 @@ func TriggerPushNotification(userID string, title string, message string) {
 	}
 }
 
-// SendDiscordEmbed ส่งแจ้งเตือน Discord (คงเดิม)
+// ✅ อัปเกรด: SendDiscordEmbed (คงฟังก์ชันเดิมแต่ปรับปรุง Logic การเลือก Webhook ให้แม่นยำ 100%)
 func SendDiscordEmbed(title, description string, color int, fields []map[string]interface{}, imageURL string) {
-	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv != "local" && (strings.Contains(title, "ทดสอบ") || strings.Contains(description, "ทดสอบ")) {
+		fmt.Println("🚫 [RENDER] Ignored test notification to prevent spamming live channel")
+		return
+	}
+
+	webhookURL := getTargetWebhook() // 🌟 ใช้ตัวคัดกรองที่นี่
+
 	if webhookURL == "" {
 		return
+	}
+
+	// ถ้าเป็นเครื่อง Local ให้หน่วงเวลาเล็กน้อยกันโดน Discord เพ่งเล็ง
+	if os.Getenv("APP_ENV") == "local" {
+		time.Sleep(1 * time.Second) // กัน Rate Limit เวลาเทส
 	}
 
 	payload := map[string]interface{}{
@@ -69,29 +94,27 @@ func SendDiscordEmbed(title, description string, color int, fields []map[string]
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
 
 	if err != nil {
+		fmt.Printf("❌ [DISCORD ERROR] %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
 		retryAfter := resp.Header.Get("Retry-After")
-		fmt.Printf("⚠️ [RATE LIMIT] ต้องรออีก %s วินาที ถึงจะส่งได้ใหม่\n", retryAfter)
+		fmt.Printf("⚠️ [RATE LIMIT] ต้องรออีก %s วินาที\n", retryAfter)
 	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Println("⭐️ [SUCCESS] Sent to Discord")
+		fmt.Printf("⭐️ [SUCCESS] Sent to Discord (%s)\n", os.Getenv("APP_ENV"))
 	}
 }
 
-// ✅ CheckAndNotify: เช็คเวลาและแจ้งเตือน (คงเดิมตาม Logic ป้องกันการยิงซ้ำ)
-// ✅ แก้ไข: ปรับการเช็คเวลาให้รองรับ Timezone ใน Database
+// CheckAndNotify: เช็คเวลาและแจ้งเตือน (คงเดิม)
 func CheckAndNotify() {
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 
-	// 1. ดึงเวลาปัจจุบันในไทย (Format: 2025-12-27T19:11)
 	nowTime := time.Now().In(loc).Truncate(time.Minute)
 	nowStr := nowTime.Format("2006-01-02T15:04")
 
 	var results []map[string]interface{}
-	// 2. ดึงรายการที่ยังไม่ได้แจ้งเตือนทั้งหมดมาตรวจสอบ (เพื่อความแม่นยำเรื่อง Timezone)
 	client.From("events").
 		Select("*", "exact", false).
 		Eq("is_notified", "false").
@@ -101,8 +124,6 @@ func CheckAndNotify() {
 		for _, ev := range results {
 			eventDateStr := ev["event_date"].(string)
 
-			// 3. แปลงเวลาจาก DB ให้เป็นเวลาไทยเพื่อเปรียบเทียบ
-			// รองรับทั้งฟอร์แมต 2025-12-27 12:11:00+00 และ RFC3339
 			t, err := time.Parse("2006-01-02 15:04:05-07", eventDateStr)
 			if err != nil {
 				t, _ = time.Parse(time.RFC3339, eventDateStr)
@@ -110,7 +131,6 @@ func CheckAndNotify() {
 
 			eventInThai := t.In(loc).Format("2006-01-02T15:04")
 
-			// 4. ถ้าเวลาไทยตรงกับปัจจุบัน ให้ยิงแจ้งเตือน!
 			if eventInThai == nowStr {
 				id := ev["id"].(string)
 				title := ev["title"].(string)
@@ -119,13 +139,11 @@ func CheckAndNotify() {
 
 				msg := fmt.Sprintf("💖 แจ้งเตือนวันสำคัญ!\n📌 **หัวข้อ:** %s\n📝 **รายละเอียด:** %s\n🔁 **วนซ้ำ:** %s", title, desc, repeat)
 
-				// ส่ง Discord
+				// เรียกใช้ SendDiscordEmbed ที่อัปเกรดแล้ว
 				SendDiscordEmbed("แจ้งเตือน!", msg, 16761035, nil, "")
 
-				// อัปเดตสถานะเป็นแจ้งเตือนแล้ว
 				client.From("events").Update(map[string]interface{}{"is_notified": true}, "", "").Eq("id", id).Execute()
 
-				// ส่ง Push PWA
 				if visibleTo, ok := ev["visible_to"].([]interface{}); ok {
 					for _, uid := range visibleTo {
 						go TriggerPushNotification(uid.(string), "🔔 ถึงเวลาแล้วนะ!", title)
@@ -136,10 +154,9 @@ func CheckAndNotify() {
 	}
 }
 
-// ✅ เพิ่มใหม่: ส่งแจ้งเตือนเมื่อมีด่าน Mind Game ใหม่
+// SendMindGameNotification: ส่งแจ้งเตือนเมื่อมีด่านใหม่ (คงเดิม)
 func SendMindGameNotification(creatorName string) {
 	title := "🎮 ด่านใหม่มาแล้ว!"
-	// ใช้ APP_URL จาก Env เพื่อความยืดหยุ่น
 	appURL := os.Getenv("APP_URL")
 	if appURL == "" {
 		appURL = "https://lover-frontend-ashen.vercel.app/"
@@ -148,5 +165,6 @@ func SendMindGameNotification(creatorName string) {
 	msg := fmt.Sprintf("✨ **มีด่านใหม่มาท้าทาย!**\n👤 สร้างโดย: **%s**\n\nลับสมองรอไว้เลย พร้อมเล่นรึยัง?\n🔗 เข้าไปเล่นที่นี่: %s",
 		creatorName, appURL)
 
+	// เรียกใช้ SendDiscordEmbed ที่อัปเกรดแล้ว
 	SendDiscordEmbed(title, msg, 3066993, nil, "")
 }

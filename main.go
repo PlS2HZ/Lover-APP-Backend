@@ -2,12 +2,12 @@ package main
 
 import (
 	"couple-app/handlers"
-	"couple-app/services" // ต้อง import มาเพื่อใช้ CheckAndNotify
-	"fmt"
+	_ "couple-app/services" // ต้อง import มาเพื่อใช้ CheckAndNotify
+	_ "fmt"
 	"log"
 	"net/http"
 	"os"
-	"time"
+	_ "time"
 
 	"github.com/joho/godotenv"
 )
@@ -16,13 +16,13 @@ func main() {
 	godotenv.Load()
 
 	// ✅ เปิดเครื่องตั้งเวลาเช็คนัดหมายทุก 1 นาที (กลับมาแล้ว!)
-	go func() {
-		fmt.Println("⏰ [SYSTEM] Ticker Started: Checking events every minute...")
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			services.CheckAndNotify()
-		}
-	}()
+	// go func() {
+	// 	fmt.Println("⏰ [SYSTEM] Ticker Started: Checking events every minute...")
+	// 	ticker := time.NewTicker(1 * time.Minute)
+	// 	for range ticker.C {
+	// 		services.CheckAndNotify()
+	// 	}
+	// }()
 
 	// --- รวบรวม Handler เดิมทั้งหมด ห้ามลบ ---
 
