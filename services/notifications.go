@@ -58,12 +58,15 @@ func TriggerPushNotification(userID string, title string, message string) {
 // ✅ อัปเกรด: SendDiscordEmbed (คงฟังก์ชันเดิมแต่ปรับปรุง Logic การเลือก Webhook ให้แม่นยำ 100%)
 func SendDiscordEmbed(title, description string, color int, fields []map[string]interface{}, imageURL string) {
 	appEnv := os.Getenv("APP_ENV")
-	if appEnv != "local" && (strings.Contains(title, "ทดสอบ") || strings.Contains(description, "ทดสอบ")) {
-		fmt.Println("🚫 [RENDER] Ignored test notification to prevent spamming live channel")
-		return
-	}
+	webhookURL := getTargetWebhook()
 
-	webhookURL := getTargetWebhook() // 🌟 ใช้ตัวคัดกรองที่นี่
+	if appEnv != "local" && (strings.Contains(title, "ทดสอบ") || strings.Contains(description, "ทดสอบ")) {
+		fmt.Println("🔄 [RENDER] Rerouting test notification to TEST_WEBHOOK")
+		webhookURL = os.Getenv("TEST_WEBHOOK_URL") // มั่นใจว่ามีตัวแปรนี้ใน Render ด้วยนะ
+		if webhookURL == "" {
+			return // ถ้าไม่มี Webhook เทสใน Render ค่อยหยุดส่ง
+		}
+	}
 
 	if webhookURL == "" {
 		return
