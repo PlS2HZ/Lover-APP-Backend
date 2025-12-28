@@ -35,6 +35,7 @@ func TriggerPushNotification(userID string, title string, message string) {
 			TTL:             30,
 		})
 		if err == nil {
+			fmt.Printf("✅ [PUSH SUCCESS] Sent to device for user: %s (Status: %d)\n", userID, resp.StatusCode)
 			resp.Body.Close()
 		} else {
 			fmt.Printf("❌ [PUSH ERROR] %v\n", err)
