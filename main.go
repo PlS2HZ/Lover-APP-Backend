@@ -79,6 +79,8 @@ func main() {
 	http.HandleFunc("/api/memory-quiz/submit", handlers.HandleSubmitQuizResponse)
 	http.HandleFunc("/api/memory-quiz/delete", handlers.HandleDeleteMemory)
 
+	http.HandleFunc("/api/gang-quiz/random", handlers.HandleGetGangQuiz)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000" // ปรับเป็น 10000 ตามที่เราคุยกัน
