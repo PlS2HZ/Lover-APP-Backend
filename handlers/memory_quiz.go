@@ -91,15 +91,41 @@ func HandleGetRandomQuiz(w http.ResponseWriter, r *http.Request) {
 	if utils.EnableCORS(&w, r) {
 		return
 	}
-	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
-	var memories []map[string]interface{}
-	client.From("memories").Select("content", "exact", false).Limit(100, "").ExecuteTo(&memories)
-	if len(memories) == 0 {
-		http.Error(w, "No memories", 404)
+
+	userId := r.URL.Query().Get("user_id")
+	client, err := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
+	if err != nil {
+		http.Error(w, "Database Connection Error", 500)
 		return
 	}
-	rand.Seed(time.Now().UnixNano())
-	content := memories[rand.Intn(len(memories))]["content"].(string)
-	quiz, _ := services.GenerateQuizFromMemory(content)
+
+	var memories []map[string]interface{}
+	query := client.From("memories").Select("content", "exact", false)
+	if userId != "" {
+		query = query.Filter("visible_to", "cs", "{"+userId+"}")
+	}
+
+	_, err = query.Limit(500, "").ExecuteTo(&memories)
+	if err != nil || len(memories) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "ไม่พบความทรงจำ"})
+		return
+	}
+
+	// สุ่มแบบกระจายตัวสมบูรณ์
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	content := memories[rng.Intn(len(memories))]["content"].(string)
+
+	quiz, err := services.GenerateQuizFromMemory(content)
+	if err != nil {
+		fmt.Printf("❌ AI Error: %v\n", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // ส่ง 200 เพื่อให้หน้าบ้านแสดง Error นุ่มนวล
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(quiz)
 }
