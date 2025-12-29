@@ -14,18 +14,16 @@ func HandleGetGangQuiz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	category := r.URL.Query().Get("category")
-	if category == "" {
-		category = "ความรู้รอบตัว"
-	}
+	exclude := r.URL.Query().Get("exclude") // ✅ รับรายการคำถามที่เคยเล่นไปแล้ว
 
-	prompt := fmt.Sprintf(`Create a single fun Thai trivia quiz about %s. 
-Return exactly one JSON object. Do not put it in a list. 
-Structure: {"question": string, "options": [4 strings], "answer_index": 0-3, "sweet_comment": string}`, category)
+	prompt := fmt.Sprintf(`ในฐานะมหาปราชญ์ผู้รอบรู้ จงสร้างคำถามเกี่ยวกับ "%s" 
+โดยมีเงื่อนไขเพิ่มเติม: **ห้ามสร้างคำถามที่ซ้ำหรือใกล้เคียงกับรายการต่อไปนี้เด็ดขาด: [%s]**
+เน้นความแปลกใหม่และไม่เคยเห็นมาก่อนในระดับสากล
+Return JSON ONLY: {"question": string, "options": [4 strings], "answer_index": 0-3, "sweet_comment": string}`, category, exclude)
 
-	quiz, err := services.GenerateQuizFromGroq(prompt)
+	quiz, err := services.GenerateGangQuiz(prompt)
 	if err != nil {
-		// ส่ง Error กลับไปให้ Frontend รู้เรื่อง
-		http.Error(w, "AI มึนตึ๊บ: "+err.Error(), 500)
+		http.Error(w, "AI Error: "+err.Error(), 500)
 		return
 	}
 
