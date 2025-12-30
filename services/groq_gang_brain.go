@@ -17,17 +17,16 @@ type QuizResponse struct {
 	SweetComment string   `json:"sweet_comment"`
 }
 
-// ตรวจสอบชื่อฟังก์ชันตรงนี้: ต้องเป็น GenerateGangQuiz
 func GenerateGangQuiz(prompt string) (*QuizResponse, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
 	url := "https://api.groq.com/openai/v1/chat/completions"
 
 	payload := map[string]interface{}{
-		"model": "llama-3.1-8b-instant",
+		"model": "llama-3.3-70b-versatile", // ✅ อัปเกรดเป็นตัวที่ฉลาดที่สุดเพื่อป้องกันการมโน
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "You are the 'Great Sage', an omniscient and wise entity. Return ONLY a single valid JSON object.",
+				"content": "You are the 'Great Sage'. Return ONLY valid JSON. Your answers must be factually accurate and strictly follow the requested category.",
 			},
 			{
 				"role":    "user",
@@ -35,7 +34,7 @@ func GenerateGangQuiz(prompt string) (*QuizResponse, error) {
 			},
 		},
 		"response_format": map[string]string{"type": "json_object"},
-		"temperature":     0.5,
+		"temperature":     0.2, // ✅ ลดความเพ้อเจ้อของ AI ให้ต่ำที่สุด เน้น Fact 100%
 	}
 
 	jsonData, _ := json.Marshal(payload)
@@ -68,9 +67,6 @@ func GenerateGangQuiz(prompt string) (*QuizResponse, error) {
 	}
 
 	aiContent := strings.TrimSpace(result.Choices[0].Message.Content)
-	aiContent = strings.TrimPrefix(aiContent, "```json")
-	aiContent = strings.TrimSuffix(aiContent, "```")
-
 	var quiz QuizResponse
 	if err := json.Unmarshal([]byte(aiContent), &quiz); err != nil {
 		return nil, err
