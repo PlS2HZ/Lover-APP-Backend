@@ -44,11 +44,6 @@ func main() {
 	http.HandleFunc("/api/wishlist/complete", handlers.HandleCompleteWish)
 	http.HandleFunc("/api/wishlist/delete", handlers.HandleDeleteWishlist)
 
-	// Moments
-	http.HandleFunc("/api/moment/save", handlers.HandleSaveMoment)
-	http.HandleFunc("/api/moment/get", handlers.HandleGetMoments)
-	http.HandleFunc("/api/moment/delete", handlers.HandleDeleteMoment)
-
 	// Requests
 	http.HandleFunc("/api/request", handlers.HandleCreateRequest)
 	http.HandleFunc("/api/my-requests", handlers.HandleGetMyRequests)
