@@ -36,6 +36,7 @@ func main() {
 	http.HandleFunc("/api/save-mood", handlers.HandleSaveMood)
 	http.HandleFunc("/api/get-moods", handlers.HandleGetMoods)
 	http.HandleFunc("/api/mood/delete", handlers.HandleDeleteMood)
+	http.HandleFunc("/api/mood/insight", handlers.HandleGetMoodInsight)
 
 	// Wishlist
 	http.HandleFunc("/api/wishlist/save", handlers.HandleSaveWishlist)
