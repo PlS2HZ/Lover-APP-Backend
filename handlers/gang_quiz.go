@@ -1,22 +1,27 @@
 package handlers
 
 import (
-	"couple-app/services"
-	"couple-app/utils"
-	"encoding/json"
-	"fmt"
-	"net/http"
+	"couple-app/services" // เรียกใช้ Service สำหรับยิง AI
+	"couple-app/utils"    // เรียกใช้ Utils สำหรับ CORS
+	"encoding/json"       // จัดการ JSON
+	"fmt"                 // จัดรูปแบบข้อความ
+	"net/http"            // จัดการ HTTP Request/Response
 )
 
+// HandleGetGangQuiz: ฟังก์ชันสร้างคำถาม Gang Quiz โดยใช้ AI
 func HandleGetGangQuiz(w http.ResponseWriter, r *http.Request) {
+	// 1. ตรวจสอบ CORS เพื่อให้ Frontend (คนละโดเมน) เรียก API ได้
 	if utils.EnableCORS(&w, r) {
 		return
 	}
 
-	category := r.URL.Query().Get("category")
-	exclude := r.URL.Query().Get("exclude")
+	// 2. รับค่าจาก Query Parameter
+	category := r.URL.Query().Get("category") // หมวดหมู่ที่ต้องการ (เช่น "ความรู้รอบตัว")
+	exclude := r.URL.Query().Get("exclude")   // รายการคำถามที่เคยเล่นไปแล้ว (เพื่อกันซ้ำ)
 
-	// ✅ SUPER PROMPT 2026: บล็อกการมโนครอบคลุมครบ 10 หมวดหมู่ตาม Frontend
+	// 3. สร้าง "SUPER PROMPT 2026"
+	// ใช้ fmt.Sprintf เพื่อแทรกตัวแปร category และ exclude ลงในข้อความ Prompt
+	// ปรับปรุง: ใส่ exclude ที่ด้านล่างสุดเพื่อให้ AI เห็นชัดเจนที่สุด
 	prompt := fmt.Sprintf(`ในฐานะมหาปราชญ์ผู้รอบรู้ระดับโลก จงสร้างคำถามในหมวด "%s" 
 โดยมีกฎเหล็กที่ห้ามละเมิด (Strict Rules):
 1. ห้ามมโน (Anti-Hallucination): ข้อมูลต้องเป็นความจริงสากล 100%% ห้ามแต่งเรื่องสัตว์เป็นคน หรือสร้างเทคโนโลยี/เหตุการณ์ปลอม หรือห้ามถามเกี่ยวกับทฤษฎีที่ยังไม่พิสูจน์
@@ -34,7 +39,7 @@ func HandleGetGangQuiz(w http.ResponseWriter, r *http.Request) {
 3. ภาษาและชื่อเฉพาะ: ภาษาไทยเป็นหลัก แต่ "ชื่อเฉพาะ" (แบรนด์, คน, สถานที่, สโมสร) ต้องเป็นภาษาอังกฤษเท่านั้น
 4. ตัวเลือกหลอก: ต้องเป็นสิ่งที่มีตัวตนจริงในหมวดนั้นๆ เพื่อให้มีความใกล้เคียงกับคำตอบถูก
 5. ความยาว: สั้น ทรงพลัง (ไม่เกิน 15 คำไทย) ห้ามน้ำเยอะ
-6. รายการคำถามที่เคยเล่นไปแล้ว (ห้ามสร้างซ้ำเด็ดขาด): [%s] โดยตรวจสอบจาก exclude parameter ถและห้ามเปลี่ยนประโยคจากคำถามเดิมเพื่อมาสร้างคำถามใหม่เด็ดขาด
+6. รายการคำถามที่เคยเล่นไปแล้ว (ห้ามสร้างซ้ำเด็ดขาด): ดูจากรายการด้านล่าง ห้ามเปลี่ยนประโยคจากคำถามเดิมเพื่อมาสร้างคำถามใหม่เด็ดขาด
 7. คุณภาพ: ต้องเป็นเกร็ดความรู้ระดับสากล (Global Context) ที่น่าทึ่งและแปลกใหม่
 8. อย่ามโนเด็ดขาด! หากไม่สามารถสร้างคำถามที่ถูกต้องตามกฎ ให้ตอบกลับว่า "ไม่สามารถสร้างคำถามได้ตามกฎที่กำหนด"
 9. choices ต้องมีทั้งหมด 4 ตัวเลือก และห้ามซ้ำกันเด็ดขาด
@@ -42,14 +47,18 @@ func HandleGetGangQuiz(w http.ResponseWriter, r *http.Request) {
 
 [JSON FORMAT ONLY]
 {"question": string, "options": ["คำตอบถูก", "หลอก1", "หลอก2", "หลอก3"], "answer_index": 0, "sweet_comment": string}
-รายการที่เคยเล่นไปแล้ว: [%s]`, category, exclude)
 
+รายการที่เคยเล่นไปแล้ว (ห้ามซ้ำ): [%s]`, category, exclude)
+
+	// 4. ส่ง Prompt ไปให้ AI ประมวลผล (ผ่าน Service)
 	quiz, err := services.GenerateGangQuiz(prompt)
 	if err != nil {
+		// กรณี AI Error หรือ Parse JSON ไม่ผ่าน
 		http.Error(w, "AI Error: "+err.Error(), 500)
 		return
 	}
 
+	// 5. ส่งผลลัพธ์กลับไปให้ Frontend เป็น JSON
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(quiz)
 }

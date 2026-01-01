@@ -1,39 +1,54 @@
 package services
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"strings"
-	"time"
+	"bytes"         // ใช้สำหรับจัดการ Buffer ข้อมูล (Payload)
+	"encoding/json" // ใช้สำหรับแปลงข้อมูลเป็น JSON
+	"fmt"           // ใช้สำหรับจัดรูปแบบข้อความ (Sprintf)
+	"io"            // ใช้สำหรับอ่าน Body ของ Response
+	"net/http"      // ใช้สำหรับยิง HTTP Request ไปหา Groq
+	"os"            // ใช้สำหรับอ่าน API Key จาก Environment Variable
+	"strings"       // ใช้สำหรับจัดการ String (ตัดช่องว่าง)
+	"time"          // ใช้สำหรับกำหนด Timeout ของการยิง API
 )
 
-// ✅ ปรับความสุ่มให้เหมาะสม (0.7 สำหรับการสุ่มคำ)
+// AskGroqRaw: ฟังก์ชันเรียก AI แบบสุ่มสูง (Temperature 0.7)
+// เหมาะสำหรับงานที่ต้องการความคิดสร้างสรรค์ เช่น การสุ่มคำศัพท์ตั้งต้นในโหมดบอท
 func AskGroqRaw(prompt string) string {
 	return AskGroqCustomWithTemp(prompt, 200, 0.7)
 }
 
+// AskGroqCustomWithTemp: ฟังก์ชันหลัก (Core) ในการยิง Request ไปหา Groq API
+// รับค่า Prompt, MaxTokens (ความยาวสูงสุด), และ Temperature (ความสุ่ม)
 func AskGroqCustomWithTemp(prompt string, maxTokens int, temp float64) string {
-	apiKey := os.Getenv("GROQ_API_KEY")
-	url := "https://api.groq.com/openai/v1/chat/completions"
+	apiKey := os.Getenv("GROQ_API_KEY")                      // อ่าน Key จาก Env
+	url := "https://api.groq.com/openai/v1/chat/completions" // Endpoint ของ Groq
+
+	// เตรียม Payload (ข้อมูลที่จะส่งไป)
 	payload := map[string]interface{}{
-		"model":       "llama-3.3-70b-versatile",
+		"model":       "llama-3.3-70b-versatile", // ใช้โมเดล Llama 3.3 ตัวใหม่ล่าสุด (เก่งและเร็ว)
 		"messages":    []map[string]interface{}{{"role": "user", "content": prompt}},
-		"temperature": temp,
-		"max_tokens":  maxTokens,
-		"top_p":       0.8,
+		"temperature": temp,      // ค่าความสุ่ม (0.0 = เป๊ะมาก, 1.0 = มั่วได้ใจ)
+		"max_tokens":  maxTokens, // จำกัดความยาวคำตอบ
+		"top_p":       0.8,       // เทคนิคการสุ่มคำแบบ Top P
 	}
+
+	// แปลง Payload เป็น JSON
 	jsonData, _ := json.Marshal(payload)
+
+	// สร้าง HTTP Request
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey) // ใส่ Token ยืนยันตัวตน
+
+	// สร้าง Client พร้อมกำหนด Timeout 15 วินาที (ถ้า AI ตอบช้าเกินให้ตัดจบ)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, _ := client.Do(req)
-	defer resp.Body.Close()
+	defer resp.Body.Close() // ปิด Connection เมื่อเสร็จสิ้น
+
+	// อ่านข้อมูลที่ AI ตอบกลับมา
 	body, _ := io.ReadAll(resp.Body)
+
+	// สร้างโครงสร้างมารับ JSON Response
 	var groqResp struct {
 		Choices []struct {
 			Message struct {
@@ -41,19 +56,27 @@ func AskGroqCustomWithTemp(prompt string, maxTokens int, temp float64) string {
 			} `json:"message"`
 		} `json:"choices"`
 	}
+
+	// แกะซอง JSON
 	json.Unmarshal(body, &groqResp)
+
+	// ถ้าไม่มีคำตอบกลับมา ให้ส่งค่าว่าง
 	if len(groqResp.Choices) == 0 {
 		return ""
 	}
+
+	// ส่งคำตอบกลับไป (ตัดช่องว่างหน้าหลังออกด้วย TrimSpace)
 	return strings.TrimSpace(groqResp.Choices[0].Message.Content)
 }
 
-// ✅ ปรับความแม่นยำสูง (0.3 สำหรับการตอบคำถาม)
+// AskGroqCustom: ฟังก์ชันเรียก AI แบบแม่นยำสูง (Temperature 0.3)
+// เหมาะสำหรับการตอบคำถาม Fact, ความรู้ทั่วไป, หรือการวิเคราะห์ข้อมูลที่ห้ามมั่ว
 func AskGroqCustom(prompt string, maxTokens int) string {
 	return AskGroqCustomWithTemp(prompt, maxTokens, 0.3)
 }
 
-// ✅ [Masterpiece] GenerateDescriptionGroq: เน้นเนื้อๆ ป้องกัน Context Overflow
+// ✅ [Masterpiece] GenerateDescriptionGroq: ฟังก์ชันสร้างคำอธิบาย (Description) สำหรับคำลับ
+// ใช้เทคนิค Prompt Engineering เพื่อบีบให้ AI ตอบเฉพาะเนื้อหาสำคัญ ไม่เอาน้ำ
 func GenerateDescriptionGroq(word string) string {
 	prompt := fmt.Sprintf(`
     [SYSTEM ROLE] นายคือ "มหาปราชญ์ผู้สรุปสาระสำคัญ" 
@@ -71,10 +94,11 @@ func GenerateDescriptionGroq(word string) string {
     - **ห้ามเขียนน้ำเยอะ**: ให้เน้นข้อมูลที่เป็นเอกลักษณ์เฉพาะตัว (Unique Identifiers)
     - ข้อมูลต้องตรงตาม Fact 100%% หากมโนข้อมูลผิดจะถูกลงโทษ`, word, word)
 
-	return AskGroqCustom(prompt, 1000) // ปรับลดลงตามข้อแนะนำ เพื่อป้องกัน AI หลุดโฟกัส
+	return AskGroqCustom(prompt, 1000) // ใช้ Token เยอะหน่อยเพื่อให้ AI อธิบายได้ครบถ้วน แต่ Temp ต่ำเพื่อความแม่น
 }
 
-// ✅ [Masterpiece] AskGroq: ฉลาด ยืดหยุ่น และมีระบบ Anti-Cheese
+// ✅ [Masterpiece] AskGroq: ฟังก์ชันหลักของ "Game Master (GM)"
+// ทำหน้าที่ตอบคำถามของผู้เล่น โดยใช้ข้อมูลคำลับ (SecretWord) และคำอธิบาย (Description) เป็นฐานข้อมูล
 func AskGroq(secretWord string, description string, question string) string {
 	prompt := fmt.Sprintf(`
     [System Role] 
@@ -105,10 +129,11 @@ func AskGroq(secretWord string, description string, question string) string {
 
     คำถามจากผู้เล่น: "%s"`, secretWord, description, secretWord, question)
 
-	// ใช้ Temp 0.3 เพื่อรักษาความแม่นยำของข้อมูล และ MaxTokens 500 เพื่อให้อธิบายได้ครบ
+	// ใช้ Temp 0.3 เพื่อรักษาความแม่นยำของข้อมูล และ MaxTokens 500 เพื่อให้อธิบายได้พอดี ไม่ยาวเกินไป
 	return AskGroqCustom(prompt, 500)
 }
 
+// AskGroqHint: ฟังก์ชันสร้างคำใบ้จาก Description
 func AskGroqHint(description string) string {
 	prompt := fmt.Sprintf(`สร้างคำใบ้ 1 ประโยคจากข้อมูลนี้: "%s" ห้ามเฉลยชื่อ ห้ามกวนประสาท`, description)
 	return AskGroqCustom(prompt, 200)

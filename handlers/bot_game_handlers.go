@@ -1,45 +1,54 @@
 package handlers
 
 import (
-	"couple-app/services"
-	"couple-app/utils"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
-	"strings"
-	"time"
+	"couple-app/services" // นำเข้า Service สำหรับเรียก AI (Groq)
+	"couple-app/utils"    // นำเข้า Utility เช่น CORS
+	"encoding/json"       // จัดการ JSON
+	"fmt"                 // จัดรูปแบบข้อความ (Sprintf)
+	"net/http"            // จัดการ HTTP Request/Response
+	"os"                  // อ่าน Environment Variables
+	"strings"             // จัดการ String (ตัดคำ, แทนที่คำ)
+	"time"                // จัดการเวลา (ใช้สุ่ม Random)
 
-	"github.com/supabase-community/supabase-go"
+	"github.com/supabase-community/supabase-go" // Driver สำหรับ Supabase
 )
 
-// BOT_ID ของระบบ
+// BOT_ID ของระบบ (ไอดีสมมติที่กำหนดไว้ตายตัวว่าเป็นของบอท)
 const BOT_ID = "00000000-0000-0000-0000-000000000000"
 
+// HandleBotAutoCreateGame ฟังก์ชันหลักสำหรับสร้างเกมใหม่โดยให้บอทเป็นคนตั้งโจทย์
 func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
+	// 1. จัดการ CORS เพื่อให้ Frontend (คนละโดเมน) สามารถเรียก API นี้ได้
 	if utils.EnableCORS(&w, r) {
 		return
 	}
+
+	// 2. รับข้อมูลจาก Body ว่าใครจะเป็นคนทาย (Guesser)
 	var body struct {
 		GuesserID string `json:"guesser_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
 
+	// 3. สร้าง Client เชื่อมต่อ Supabase
 	client, _ := supabase.NewClient(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), nil)
 
-	// ✅ 1. ดึงคำลับที่มีอยู่แล้วทั้งหมดมาป้องกันการซ้ำ
+	// ✅ 4. ดึงคำลับที่มีอยู่แล้วทั้งหมดมาป้องกันการซ้ำ (Logic เดิมของคุณ)
 	var existingGames []map[string]interface{}
+	// Query เลือกเฉพาะ column 'secret_word' จากตาราง heart_games
 	client.From("heart_games").Select("secret_word", "", false).ExecuteTo(&existingGames)
 
+	// วนลูปเก็บคำที่ใช้ไปแล้วเข้า Array
 	var usedWords []string
 	for _, g := range existingGames {
 		if word, ok := g["secret_word"].(string); ok {
 			usedWords = append(usedWords, word)
 		}
 	}
+	// แปลง Array เป็น String ยาวๆ คั่นด้วย comma เพื่อส่งไปบอก AI ว่า "ห้ามเอาคำพวกนี้นะ"
 	avoidList := strings.Join(usedWords, ", ")
 
-	// ✅ 2. ปรับ Prompt: สุ่มหมวดหมู่ในระดับ Go เพื่อบีบ AI ให้ไม่ตอบ Pattern เดิม
+	// ✅ 5. ปรับ Prompt: สุ่มหมวดหมู่ในระดับ Go เพื่อบีบ AI ให้ไม่ตอบ Pattern เดิม
+	// รายการหมวดหมู่ทั้งหมด (Hardcode ไว้เพื่อให้ครอบคลุมหลายแนว)
 	categories := []string{
 		// --- หมวดคนและอาชีพ ---
 		"อาชีพแปลกๆ", "อาชีพในฝัน", "ตัวละครในตำนาน", "บุคคลสำคัญ", "ศิลปิน/นักร้อง",
@@ -67,43 +76,51 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 		"ดอกไม้", "ต้นไม้", "อวัยวะในร่างกาย", "เสื้อผ้า/เครื่องแต่งกาย", "งานอดิเรก",
 		"ปรากฏการณ์ทางธรรมชาติ", "ดาวเคราะห์", "สภาพอากาศ", "เครื่องปรุงอาหาร", "ผักสวนครัว",
 	}
-	// ใช้เวลาปัจจุบันสุ่ม Index
+
+	// ใช้เวลาปัจจุบัน (UnixNano) เพื่อสุ่ม Index ของหมวดหมู่
 	randomCat := categories[time.Now().UnixNano()%int64(len(categories))]
 
+	// สร้าง Prompt สำหรับขอ "คำลับ" จาก AI โดยระบุหมวดหมู่ที่สุ่มได้ และคำต้องห้าม
 	prompt := fmt.Sprintf(`จงสุ่มคำนามภาษาไทยในหมวด "%s" มา 1 คำ 
-	กฎ: ต้องไม่ใช่คำที่ง่ายเกินไป (เช่น รถยนต์, แมว, โทรศัพท์) และห้ามซ้ำกับ: %s. 
-	ตอบแค่คำลับนั้นคำเดียวเท่านั้น!`, randomCat, avoidList)
+    กฎ: ต้องไม่ใช่คำที่ง่ายเกินไป (เช่น รถยนต์, แมว, โทรศัพท์) และห้ามซ้ำกับ: %s. 
+    ตอบแค่คำลับนั้นคำเดียวเท่านั้น!`, randomCat, avoidList)
 
-	secretWord := services.AskGroqRaw(prompt) // ตัวนี้จะใช้ Temp 1.2 ที่เราแก้ไว้
+	// 6. เรียกใช้ Service AI เพื่อขอคำลับ
+	secretWord := services.AskGroqRaw(prompt) // ฟังก์ชันนี้ใช้ Temp 1.2 เพื่อความหลากหลาย
+	// ทำความสะอาดผลลัพธ์เบื้องต้น (ตัดช่องว่าง, ตัดจุด)
 	secretWord = strings.TrimSpace(strings.ReplaceAll(secretWord, ".", ""))
+
+	// สร้าง Prompt สำหรับขอ "คำอธิบาย" 5 ข้อ
 	descPrompt := fmt.Sprintf(`
     อธิบายลักษณะของ "%s" เป็นภาษาไทย 5 หัวข้อ:
     1.ประเภท... 2.ลักษณะ... 3.การใช้... 4.สถานที่... 5.จุดเด่น...
     [กฎ] ห้ามระบุจุดเด่นที่ทำให้รู้คำเฉลยทันที ห้ามใช้คำที่เฉพาะเจาะจงเกินไป และตอบสั้นๆ หัวข้อละ 1 ประโยค ห้ามยาว ห้ามเฉลยชื่อคำนี้เด็ดขาด`, secretWord)
 
-	// ทำความสะอาดคำเผื่อ AI ดื้อใส่เครื่องหมายมา
+	// 7. Sanitization: ทำความสะอาดคำลับอีกรอบเผื่อ AI ดื้อใส่เครื่องหมายมา
 	secretWord = strings.TrimSpace(secretWord)
 	secretWord = strings.ReplaceAll(secretWord, ".", "")
-	secretWord = strings.ReplaceAll(secretWord, "\"", "")
-	secretWord = strings.ReplaceAll(secretWord, "'", "")
+	secretWord = strings.ReplaceAll(secretWord, "\"", "") // ตัดฟันหนูคู่
+	secretWord = strings.ReplaceAll(secretWord, "'", "")  // ตัดฟันหนูเดี่ยว
 
+	// ถ้า AI เอ๋อ ไม่ตอบอะไรกลับมา ให้ใช้คำว่า "เครื่องบิน" กันโปรแกรมพัง
 	if secretWord == "" {
 		secretWord = "เครื่องบิน" // Fallback word
 	}
 
-	// ✅ 3. สั่งให้ AI สร้างฐานความรู้ (ใช้คำสั่ง GenerateDescription ที่นายพอใจ)
+	// ✅ 8. สั่งให้ AI สร้างคำอธิบาย (Description) ตาม Prompt ที่เตรียมไว้
 	description := services.AskGroqCustom(descPrompt, 800)
 
-	// 4. บันทึกลงตาราง heart_games
+	// 9. เตรียมข้อมูลสำหรับบันทึกลงตาราง heart_games
 	newGame := map[string]interface{}{
-		"host_id":     BOT_ID,
-		"secret_word": secretWord,
-		"description": description,
-		"use_bot":     true,
-		"is_template": true,
-		"status":      "waiting",
+		"host_id":     BOT_ID,      // คนสร้างคือบอท
+		"secret_word": secretWord,  // คำลับที่ได้
+		"description": description, // คำใบ้
+		"use_bot":     true,        // เปิดโหมดบอท
+		"is_template": true,        // เป็นเทมเพลต (อาจจะเอากลับมาเล่นซ้ำได้ในอนาคต)
+		"status":      "waiting",   // สถานะเริ่มต้น
 	}
 
+	// 10. Insert ลง Database (Table: heart_games)
 	resp, _, err := client.From("heart_games").Insert(newGame, false, "", "", "").Execute()
 	if err != nil {
 		fmt.Printf("❌ DB Insert Error: %v\n", err)
@@ -111,6 +128,7 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// แปลงผลลัพธ์จาก DB เพื่อเอา Game ID
 	var gameResult []map[string]interface{}
 	json.Unmarshal(resp, &gameResult)
 	if len(gameResult) == 0 {
@@ -119,15 +137,22 @@ func HandleBotAutoCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	gameID := gameResult[0]["id"].(string)
 
-	// 5. สร้าง Session
+	// 11. สร้าง Session การเล่น (Table: game_sessions)
 	newSession := map[string]interface{}{
-		"game_id": gameID, "guesser_id": body.GuesserID, "mode": "bot", "status": "playing",
+		"game_id":    gameID,         // ผูกกับเกมที่เพิ่งสร้าง
+		"guesser_id": body.GuesserID, // ผูกกับคนทาย
+		"mode":       "bot",          // โหมดบอท
+		"status":     "playing",      // สถานะกำลังเล่น
 	}
+	// Insert Session
 	respSess, _, _ := client.From("game_sessions").Insert(newSession, false, "", "", "").Execute()
+
+	// แปลงผลลัพธ์ Session เพื่อส่งกลับให้ Frontend
 	var sessionResult []map[string]interface{}
 	json.Unmarshal(respSess, &sessionResult)
 
+	// 12. ส่ง Response กลับไปหา Frontend (JSON)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusCreated) // 201 Created
 	json.NewEncoder(w).Encode(sessionResult[0])
 }
